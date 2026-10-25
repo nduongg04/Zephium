@@ -5338,6 +5338,17 @@ async fn sidebar_set_hidden(caller: WebviewWindow, hidden: bool) {
     else {
         return;
     };
+    // Showing waits for the floating column to go back beneath the page and
+    // hiding does not, so two quick toggles could land out of order. Only the
+    // newest request changes anything, and it holds the lock until the shell
+    // has it.
+    static REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static APPLYING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let request = REQUEST.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+    let _applying = APPLYING.lock().await;
+    if REQUEST.load(std::sync::atomic::Ordering::Acquire) != request {
+        return;
+    }
     // A column left floating over the page would cover it once the page
     // moves back beside the column.
     #[cfg(target_os = "macos")]
@@ -5351,14 +5362,15 @@ async fn sidebar_set_hidden(caller: WebviewWindow, hidden: bool) {
 }
 
 /// Floats the hidden sidebar, `width` wide, over the page, or puts it back
-/// beneath. Only macOS can raise the chrome over pages; elsewhere this
-/// refuses.
+/// beneath. `null` when it could not; otherwise whether the pointer is on the
+/// column's side once it stands. Only macOS can raise the chrome over pages;
+/// elsewhere this refuses.
 #[tauri::command]
 #[specta::specta]
-async fn sidebar_overlay(caller: WebviewWindow, raised: bool, width: f64) -> bool {
+async fn sidebar_overlay(caller: WebviewWindow, raised: bool, width: f64) -> Option<bool> {
     if !authorize(&caller, CallerPolicy::Main, "sidebar_overlay") || !sidebar_width_in_bounds(width)
     {
-        return false;
+        return None;
     }
     #[cfg(target_os = "macos")]
     {
@@ -5367,7 +5379,7 @@ async fn sidebar_overlay(caller: WebviewWindow, raised: bool, width: f64) -> boo
     #[cfg(not(target_os = "macos"))]
     {
         let _ = raised;
-        false
+        None
     }
 }
 

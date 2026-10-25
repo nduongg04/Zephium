@@ -214,7 +214,11 @@
       over = event.detail.inside;
       if (over) {
         stay();
-        void peek();
+        void peek().then((onSide) => {
+          if (onSide === null) return;
+          over = onSide;
+          if (!over) leave();
+        });
       } else {
         pointerIn = false;
         leave();
@@ -357,9 +361,9 @@
        the way in its first beat. */
     transition: translate var(--sidebar-slide) cubic-bezier(0.37, 0, 0.63, 1);
 
-    /* The slide is where the column is, not decoration: like the page's own
-       slide with Cmd+S, which native draws whatever the motion setting, it
-       stays when the system asks for reduced motion, which otherwise
+    /* The slide is where the column is, not decoration. Like the page's own
+       slide as the column hides or shows, which native draws whatever the
+       motion setting, it stays under reduced motion, which otherwise
        collapses every transition to a frame. */
     transition-duration: var(--sidebar-slide) !important;
   }

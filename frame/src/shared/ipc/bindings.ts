@@ -524,10 +524,11 @@ export const commands = {
 	sidebarSetHidden: (hidden: boolean) => __TAURI_INVOKE<void>("sidebar_set_hidden", { hidden }),
 	/**
 	 *  Floats the hidden sidebar, `width` wide, over the page, or puts it back
-	 *  beneath. Only macOS can raise the chrome over pages; elsewhere this
-	 *  refuses.
+	 *  beneath. `null` when it could not; otherwise whether the pointer is on the
+	 *  column's side once it stands. Only macOS can raise the chrome over pages;
+	 *  elsewhere this refuses.
 	 */
-	sidebarOverlay: (raised: boolean, width: number | null) => __TAURI_INVOKE<boolean>("sidebar_overlay", { raised, width }),
+	sidebarOverlay: (raised: boolean, width: number | null) => __TAURI_INVOKE<boolean | null>("sidebar_overlay", { raised, width }),
 	sidebarResize: (width: number | null, enabled: boolean, revision: number | null) => __TAURI_INVOKE<boolean>("sidebar_resize", { width, enabled, revision }),
 	sidebarResizeGuide: (width: number | null) => __TAURI_INVOKE<boolean>("sidebar_resize_guide", { width }),
 	tabDragOver: (x: number | null, y: number | null) => __TAURI_INVOKE<void>("tab_drag_over", { x, y }),

@@ -305,14 +305,19 @@ export function holdHidden(held: boolean) {
 /**
  * Floats the hidden column over the page. It is raised first and then slides
  * in, so the whole of the slide is seen rather than its start under the page.
+ * Resolves whether the pointer is on the column's side once it is up, or
+ * `null` when it did not come up: a pointer that left while it was rising has
+ * no departure left to announce.
  */
-export async function peek() {
-  if (!isHidden() || peeking || raising) return;
+export async function peek(): Promise<boolean | null> {
+  if (!isHidden() || peeking || raising) return null;
   const seq = ++peekSeq;
   raising = true;
-  const raised = await commands.sidebarOverlay(true, effectiveWidth()).catch(() => false);
+  const onSide = await commands.sidebarOverlay(true, effectiveWidth()).catch(() => null);
   raising = false;
-  if (raised && seq === peekSeq && isHidden()) peeking = true;
+  if (onSide === null || seq !== peekSeq || !isHidden()) return null;
+  peeking = true;
+  return onSide;
 }
 
 /** Sends the column away, then returns it beneath the page once it has gone. */

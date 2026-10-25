@@ -201,6 +201,15 @@ pub(super) fn watch(chrome: &WKWebView, report: Option<Box<dyn Fn(bool)>>) {
     watch.watch_for(&parent, None);
 }
 
+/// Whether the pointer is on the column's side, as last judged.
+pub(super) fn pointer_on_side() -> bool {
+    WATCH.with_borrow(|watch| {
+        watch
+            .as_ref()
+            .is_some_and(|watch| watch.ivars().inside.get())
+    })
+}
+
 /// Whether the hidden column is floating over the page.
 pub(super) fn floating() -> bool {
     WATCH.with_borrow(|watch| {

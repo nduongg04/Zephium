@@ -75,6 +75,16 @@ impl CommandSpec {
     pub fn customizable(&self) -> bool {
         self.id != "launcher.toggle" && self.group != Group::Work
     }
+
+    /// Whether this platform can carry the command out, so it is listed in
+    /// the launcher and Keyboard settings at all.
+    pub fn available(&self) -> bool {
+        self.available_on(Platform::CURRENT)
+    }
+
+    pub fn available_on(&self, platform: Platform) -> bool {
+        platform == Platform::Mac || !MAC_ONLY.contains(&self.id)
+    }
 }
 
 const fn command(id: &'static str, title: &'static str, keys: Keys, group: Group) -> CommandSpec {
@@ -226,7 +236,8 @@ pub const REGISTRY: &[CommandSpec] = &[
     command(
         "sidebar.toggleHidden",
         "Toggle Sidebar",
-        mac_only("CmdOrCtrl+S"),
+        // Cmd+S saves the page; Ctrl+Cmd+S is the platform's own sidebar key.
+        mac_only("Cmd+Ctrl+S"),
         Group::View,
     ),
     command(
@@ -618,8 +629,9 @@ pub const REGISTRY: &[CommandSpec] = &[
 ];
 
 /// Commands only macOS carries out. WebView2 offers saved passwords itself
-/// as a field takes focus, so Windows has nothing to open.
-const MAC_ONLY: &[&str] = &["page.autofillPassword"];
+/// as a field takes focus, so Windows has nothing to open. Only macOS can
+/// float the hidden sidebar over the page.
+const MAC_ONLY: &[&str] = &["page.autofillPassword", "sidebar.toggleHidden"];
 
 /// Overrides one person may hold. Bounded so a stored keymap can never grow
 /// past the registry it describes.
@@ -670,7 +682,7 @@ pub fn resolve(overrides: &HashMap<String, String>) -> Vec<ResolvedCommand> {
 fn resolve_on(overrides: &HashMap<String, String>, platform: Platform) -> Vec<ResolvedCommand> {
     REGISTRY
         .iter()
-        .filter(|c| platform == Platform::Mac || !MAC_ONLY.contains(&c.id))
+        .filter(|c| c.available_on(platform))
         .map(|c| {
             let canonical =
                 |text: &str| Accelerator::parse(text, platform).map(|a| a.format(platform));
@@ -1019,8 +1031,19 @@ mod tests {
     fn hiding_the_sidebar_is_a_mac_view_command() {
         let command = get("sidebar.toggleHidden").expect("hidden sidebar command");
         assert_eq!(command.group, Group::View);
-        assert_eq!(command.keys.on(Platform::Mac), Some("CmdOrCtrl+S"));
+        assert_eq!(command.keys.on(Platform::Mac), Some("Cmd+Ctrl+S"));
         assert_eq!(command.keys.on(Platform::Other), None);
+        // Elsewhere it would do nothing, so it is not offered at all.
+        assert!(command.available_on(Platform::Mac));
+        assert!(!command.available_on(Platform::Other));
+        let listed = |platform| {
+            resolve_on(&HashMap::new(), platform)
+                .iter()
+                .any(|resolved| resolved.id == "sidebar.toggleHidden")
+        };
+        assert!(listed(Platform::Mac));
+        assert!(!listed(Platform::Other));
+        assert!(get("sidebar.toggleCompact").is_some_and(|c| c.available_on(Platform::Other)));
     }
 
     #[test]

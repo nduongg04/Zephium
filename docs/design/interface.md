@@ -115,8 +115,8 @@ folds into Compact, which is a deliberate toggle (Cmd+Shift+S).
 is already a complete way to browse.
 
 **Hidden (macOS)** is the one place the column floats over the page, as in Arc.
-Cmd+S, or releasing a drag well past the column's narrowest, hides it: the page
-takes its place and the window controls leave with it. The pointer reaching the
+Ctrl+Cmd+S, or releasing a drag well past the column's narrowest, hides it: the
+page takes its place and the window controls leave with it. The pointer reaching the
 window's left edge (or passing beyond it) slides the column in over the page;
 leaving the column and a 75px allowance beside it slides it away at once. Native
 raises the chrome view over the page stage for exactly that time and watches the

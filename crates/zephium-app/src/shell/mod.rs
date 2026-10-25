@@ -226,6 +226,9 @@ pub struct Shell {
     recently_closed: Vec<zephium_core::session::PersistedClosedTab>,
     windows: Windows,
     pending_size: Size,
+    /// A hidden sidebar asked for before the window exists: the frame's
+    /// stored preference can arrive ahead of bootstrap.
+    pending_sidebar_hidden: bool,
     favicons: FaviconState,
     history: history::HistoryState,
     bookmarks: bookmarks::BookmarkState,
@@ -470,6 +473,7 @@ impl Shell {
             recently_closed: Vec::new(),
             windows: Windows::default(),
             pending_size: Size::default(),
+            pending_sidebar_hidden: false,
             favicons: FaviconState::default(),
             history: history::HistoryState::default(),
             bookmarks: bookmarks::BookmarkState::default(),
@@ -960,6 +964,7 @@ impl Shell {
             }
             Command::SetSidebarHidden(hidden) => {
                 let Some(win) = self.windows.focused_mut() else {
+                    self.pending_sidebar_hidden = hidden;
                     return;
                 };
                 if win.metrics.sidebar_hidden == hidden {

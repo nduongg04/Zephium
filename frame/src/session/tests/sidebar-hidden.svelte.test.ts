@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 const native = vi.hoisted(() => ({
   hidden: vi.fn(async (_hidden: boolean) => undefined),
-  overlay: vi.fn(async (_raised: boolean, _width: number | null) => true),
+  overlay: vi.fn(async (_raised: boolean, _width: number | null): Promise<boolean | null> => true),
   width: vi.fn(async (_width: number | null, _animate: boolean, _revision: number | null) => {}),
   save: vi.fn(async (_key: string, _value: string) => ({ operation_id: null, accepted: true })),
 }));
@@ -59,7 +59,7 @@ it("floats over the page only once native has raised it", async () => {
   await peek();
   expect(isPeeking()).toBe(false);
   toggleHidden();
-  native.overlay.mockResolvedValueOnce(false);
+  native.overlay.mockResolvedValueOnce(null);
   await peek();
   expect(isPeeking()).toBe(false);
   await peek();
@@ -118,7 +118,7 @@ it("ignores a hide from a drag a newer width has overtaken", () => {
 
 it("slides in only once raised over the page", async () => {
   toggleHidden();
-  let raise: (raised: boolean) => void = () => {};
+  let raise: (onSide: boolean | null) => void = () => {};
   native.overlay.mockReturnValueOnce(new Promise((resolve) => (raise = resolve)));
   const peeking = peek();
   expect(isPeeking()).toBe(false);
@@ -135,4 +135,12 @@ it("a floating column dragged past its narrowest stays up", async () => {
   expect(isHidden()).toBe(true);
   expect(isPeeking()).toBe(true);
   expect(native.width).not.toHaveBeenCalled();
+});
+
+it("tells whether the pointer is still on the column once it is up", async () => {
+  toggleHidden();
+  // The pointer left while the column was rising: nothing else will say so.
+  native.overlay.mockResolvedValueOnce(false);
+  expect(await peek()).toBe(false);
+  expect(isPeeking()).toBe(true);
 });

@@ -679,8 +679,14 @@ pub async fn configure_sidebar_resize(
 }
 
 /// Raises the chrome over the page while the hidden sidebar is called up, or
-/// returns it beneath. Resolves whether the chrome now stands as asked.
-pub async fn set_sidebar_overlay(window: &WebviewWindow, raised: bool, column: f64) -> bool {
+/// returns it beneath. Resolves `None` when the chrome could not be moved,
+/// otherwise whether the pointer is on the column's side once it stands: one
+/// that left while the column was rising has nothing left to announce.
+pub async fn set_sidebar_overlay(
+    window: &WebviewWindow,
+    raised: bool,
+    column: f64,
+) -> Option<bool> {
     let generation = CHROME_GENERATION.load(Ordering::Acquire);
     let (send, receive) = tokio::sync::oneshot::channel();
     let owner = window.clone();
@@ -696,9 +702,12 @@ pub async fn set_sidebar_overlay(window: &WebviewWindow, raised: bool, column: f
             // The controls come back with the floating column and leave with it.
             super::window_controls::conceal(&owner, !raised);
         }
-        let _ = send.send(done);
+        let _ = send.send(done.then(|| raised && sidebar_overlay::pointer_on_side()));
     });
-    scheduled.is_ok() && receive.await.unwrap_or(false)
+    if scheduled.is_err() {
+        return None;
+    }
+    receive.await.ok().flatten()
 }
 
 /// A hidden sidebar takes the window controls with it and watches the
