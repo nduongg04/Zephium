@@ -222,6 +222,13 @@ pub const REGISTRY: &[CommandSpec] = &[
         Keys::same("CmdOrCtrl+Shift+S"),
         Group::View,
     ),
+    // Only macOS can float the column over the page, so the key is its alone.
+    command(
+        "sidebar.toggleHidden",
+        "Toggle Sidebar",
+        mac_only("CmdOrCtrl+S"),
+        Group::View,
+    ),
     command(
         "nav.reload",
         "Reload Page",
@@ -1006,6 +1013,14 @@ mod tests {
         let command = get("sidebar.toggleCompact").expect("compact sidebar command");
         assert_eq!(command.title, "Compact Mode");
         assert_eq!(command.group, Group::View);
+    }
+
+    #[test]
+    fn hiding_the_sidebar_is_a_mac_view_command() {
+        let command = get("sidebar.toggleHidden").expect("hidden sidebar command");
+        assert_eq!(command.group, Group::View);
+        assert_eq!(command.keys.on(Platform::Mac), Some("CmdOrCtrl+S"));
+        assert_eq!(command.keys.on(Platform::Other), None);
     }
 
     #[test]

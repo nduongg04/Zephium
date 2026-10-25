@@ -13,6 +13,7 @@
   import { tabs } from "$domain/tabs";
   import { surface } from "$domain/surface";
   import { uiCommands as ui } from "$domain/ui-commands";
+  import { isHidden, isPeeking } from "$session/sidebar-mode.svelte";
   import { commands } from "$shared/ipc/bindings";
   import Icon from "$shared/ui/Icon";
   import Button from "$shared/ui/Button";
@@ -121,7 +122,9 @@
     if (command.seq === 0 || command.id !== "url.focus" || input === undefined) return;
     // At rail width the field is not drawn; the launcher stands in for it.
     const tab = untrack(() => tabs.activeTab());
-    if (compact && tab?.url && (tab.content ?? "web") === "web") {
+    // A hidden column is not on screen either, unless it has been called up.
+    const offscreen = untrack(() => isHidden() && !isPeeking());
+    if ((compact || offscreen) && tab?.url && (tab.content ?? "web") === "web") {
       // Work has no page in front, so there the launcher opens empty.
       if (untrack(() => surface.currentPage()) === "work")
         void commands.runCommand("launcher.toggle");

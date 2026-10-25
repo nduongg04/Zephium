@@ -958,11 +958,27 @@ impl Shell {
             Command::SetPagePermissionCardHost(available) => {
                 self.set_page_permission_card_host(available)
             }
+            Command::SetSidebarHidden(hidden) => {
+                let Some(win) = self.windows.focused_mut() else {
+                    return;
+                };
+                if win.metrics.sidebar_hidden == hidden {
+                    return;
+                }
+                win.metrics.sidebar_hidden = hidden;
+                let id = win.id;
+                let _ = self.engine.hint_stage_motion(id, StageMotion::Slide);
+                let _ = self.relayout_with(true);
+            }
             Command::SidebarResizeGuide(width) => {
                 if let Some(win) = self.windows.focused() {
                     let zone = width.filter(|width| width.is_finite()).map(|width| {
                         let padding = win.metrics.padding;
-                        let x = (padding + zephium_core::layout::clamp_sidebar_width(width) - 2.0)
+                        // At the page's edge, across the gap from the column.
+                        let x = (padding
+                            + zephium_core::layout::clamp_sidebar_width(width)
+                            + win.metrics.gap
+                            - 2.0)
                             .min((win.size.width - padding - 2.0).max(padding));
                         Rect::new(x, padding, 2.0, (win.size.height - 2.0 * padding).max(0.0))
                     });

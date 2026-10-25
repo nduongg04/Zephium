@@ -316,7 +316,10 @@ impl Shell {
                 self.operation_set_app_setting("appearance".into(), id[6..].into())
             }
             SearchAction::RunCommand { id }
-                if matches!(id.as_str(), "split.choose" | "sidebar.toggleCompact") =>
+                if matches!(
+                    id.as_str(),
+                    "split.choose" | "sidebar.toggleCompact" | "sidebar.toggleHidden"
+                ) =>
             {
                 (self.emit)(Projection::UiCommand(id));
                 operation_result(OperationOutcome::Applied, OperationReason::MutationApplied)
