@@ -142,7 +142,37 @@ export const fields = {
     options: [
       { value: "continue", label: m.pref_general_startup_option_0 },
       { value: "new-tab", label: m.pref_general_startup_option_1 },
+      { value: "pages", label: m.pref_general_startup_option_2 },
     ],
+  },
+  "general.startup-pages": {
+    section: "general",
+    label: m.pref_general_startup_pages,
+    description: m.pref_general_startup_pages_help,
+    initial: "",
+  },
+  "network.proxy": {
+    section: "general",
+    label: m.pref_network_proxy,
+    description: m.pref_network_proxy_help_mac,
+    initial: "system",
+    options: [
+      { value: "system", label: m.network_proxy_system },
+      { value: "http", label: m.network_proxy_http },
+      { value: "socks5", label: m.network_proxy_socks5 },
+    ],
+  },
+  "network.proxy-address": {
+    section: "general",
+    label: m.pref_network_proxy_address,
+    description: m.pref_network_proxy_address_help,
+    initial: "",
+  },
+  "general.home": {
+    section: "general",
+    label: m.pref_general_home,
+    description: m.pref_general_home_help,
+    initial: "",
   },
   "general.import": {
     section: "general",
@@ -151,10 +181,25 @@ export const fields = {
     initial: "",
   },
   "general.export": {
-    preview: true,
     section: "general",
     label: m.pref_general_export,
     description: m.pref_general_export_help,
+    initial: "",
+  },
+  "appearance.zoom": {
+    section: "appearance",
+    label: m.pref_zoom_default,
+    description: m.pref_zoom_default_help,
+    initial: "100",
+    options: [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200].map((percent) => ({
+      value: String(percent),
+      label: () => m.zoom_percent({ percent }),
+    })),
+  },
+  "appearance.zoom-levels": {
+    section: "appearance",
+    label: m.zoom_levels_title,
+    description: m.zoom_levels_help,
     initial: "",
   },
   "appearance.density": {
@@ -359,6 +404,12 @@ export const fields = {
     section: "privacy",
     label: m.pref_privacy_clear,
     description: m.pref_privacy_clear_help,
+    initial: "",
+  },
+  "privacy.site-data": {
+    section: "privacy",
+    label: m.privacy_sites,
+    description: m.privacy_sites_help,
     initial: "",
   },
   "downloads.path": {

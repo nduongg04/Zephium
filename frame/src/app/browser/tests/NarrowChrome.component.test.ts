@@ -14,6 +14,7 @@ import Shell from "../Shell.svelte";
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
   return mockBindings({
+    pagePermissionCardHost: async () => {},
     tabsBootstrap: async () => {},
     sidebarSetWidth: async () => {},
     sidebarResize: async () => false,

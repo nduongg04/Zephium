@@ -177,6 +177,23 @@ test("home offers recent tabs and destinations, growing only as results need spa
   expect(screen.container.querySelector(".primary")?.textContent).toContain("Search");
 });
 
+test("a bookmark names itself and keeps the place native gave it ahead of a visit", async () => {
+  const screen = await render(LauncherPanel, { props: { context, destinations } });
+  await screen.getByRole("combobox").fill("rust");
+  await reply("rust", [
+    search("rust"),
+    { ...visit("Rust Book", "https://doc.rust-lang.org/book/"), kind: "bookmark" },
+    visit("Rust Blog", "https://blog.rust-lang.org/"),
+  ]);
+  await expect.element(screen.getByText("Bookmark", { exact: true })).toBeVisible();
+  const titles = [...screen.container.querySelectorAll(".row .title")].map((el) => el.textContent);
+  expect(titles).toEqual(["rust", "Rust Book", "Rust Blog"]);
+  const star = screen.container.querySelectorAll(".row")[1]!.querySelector(".glyph svg");
+  const globe = screen.container.querySelectorAll(".row")[2]!.querySelector(".glyph svg");
+  expect(star).not.toBeNull();
+  expect(star!.innerHTML).not.toBe(globe!.innerHTML);
+});
+
 test("renders as two glass objects where native draws the material", async () => {
   document.documentElement.dataset.material = "liquid_glass";
   await page.viewport(720, 460);

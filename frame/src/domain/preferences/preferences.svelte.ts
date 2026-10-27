@@ -30,6 +30,10 @@ const defaults = {
   "tabs.switch-to-open": "true",
   "tabs.automatic-pip": "true",
   "tabs.startup": "continue",
+  "tabs.startup-pages": "",
+  "tabs.home": "",
+  "network.proxy": "system",
+  "network.proxy-address": "",
   "time.track": "true",
   "time.retention": "90",
   "focus.minutes": "25",
@@ -55,6 +59,7 @@ const defaults = {
   "tasks.enabled": "true",
   "time.enabled": "true",
   "work.favourite-models": "",
+  "zoom.default": "100",
 } as const;
 export type PreferenceKey = keyof typeof defaults;
 const values = $state<Record<PreferenceKey, string>>({ ...defaults });

@@ -352,8 +352,16 @@ impl Hub {
             let mut removed = 0usize;
             {
                 let mut delete = tx.prepare_cached("DELETE FROM history WHERE url = ?1")?;
+                let mut forget_icon =
+                    tx.prepare_cached("DELETE FROM page_favicons WHERE page = ?1")?;
                 for url in urls {
                     removed += delete.execute([url])?;
+                    if let Some(page) = url::Url::parse(url)
+                        .ok()
+                        .and_then(|parsed| zephium_core::icon::page_key(&parsed))
+                    {
+                        forget_icon.execute([page])?;
+                    }
                 }
             }
             tx.commit()?;
@@ -397,6 +405,18 @@ impl Hub {
                     tx.execute("DELETE FROM search_queries WHERE last_used >= ?1", [since])?
                 }
                 None => tx.execute("DELETE FROM search_queries", [])?,
+            };
+            // A page's icon is kept under its address, which is history.
+            match since {
+                Some(since) => {
+                    tx.execute("DELETE FROM page_favicons WHERE fetched_at >= ?1", [since])?
+                }
+                None => tx.execute("DELETE FROM page_favicons", [])?,
+            };
+            // A saved zoom level is a record of the sites visited.
+            match since {
+                Some(since) => tx.execute("DELETE FROM site_zoom WHERE set_at >= ?1", [since])?,
+                None => tx.execute("DELETE FROM site_zoom", [])?,
             };
             tx.execute("DELETE FROM blocker_statistics", [])?;
             tx.commit()?;

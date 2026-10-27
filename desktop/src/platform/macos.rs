@@ -164,6 +164,20 @@ pub fn enforce_runtime_security_floor(
     })
 }
 
+/// The WebKit that draws pages, and the Safari it ships with.
+pub fn webkit_version() -> Option<String> {
+    // SAFETY: `WKWebView::class()` is a live Objective-C class from the linked
+    // WebKit framework, exactly as required by `bundleForClass:`.
+    let webkit = unsafe { NSBundle::bundleForClass(WKWebView::class()) };
+    let build = bundle_string(&webkit, ns_string!("CFBundleVersion")).ok()?;
+    let safari = NSBundle::bundleWithPath(ns_string!("/Applications/Safari.app"))
+        .and_then(|bundle| bundle_string(&bundle, ns_string!("CFBundleShortVersionString")).ok());
+    Some(match safari {
+        Some(version) => format!("WebKit {build} (Safari {version})"),
+        None => format!("WebKit {build}"),
+    })
+}
+
 fn require_bundle_identifier(
     bundle: &NSBundle,
     expected: &str,

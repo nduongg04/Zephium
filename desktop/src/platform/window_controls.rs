@@ -34,7 +34,8 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{
     ns_string, MainThreadMarker, NSArray, NSInsetRect, NSNotification, NSNotificationCenter,
-    NSNumber, NSObject, NSObjectProtocol, NSPoint, NSPointInRect, NSRect, NSUnionRect,
+    NSNumber, NSObject, NSObjectProtocol, NSPoint, NSPointInRect, NSProcessInfo, NSRect,
+    NSUnionRect,
 };
 use objc2_quartz_core::{CABasicAnimation, CAMediaTiming, CAMediaTimingFunction, CATransaction};
 use tauri::WebviewWindow;
@@ -51,6 +52,10 @@ const REST_SECONDS: f64 = 0.24;
 /// sixth over a dark ground. On a light ground the same step is taken in ink.
 const REST_DARK: (f64, f64) = (1.0, 0.17);
 const REST_LIGHT: (f64, f64) = (0.0, 0.13);
+
+/// Before macOS 26 a control's frame is 14 by 16 points with a 12 point disc
+/// centred in it; filling the frame would rest as a larger, taller oval.
+const LEGACY_DISC: f64 = 12.0;
 
 pub struct Ivars {
     tracking: RefCell<Option<Retained<NSTrackingArea>>>,
@@ -100,7 +105,7 @@ define_class!(
             let (white, alpha) = if self.is_dark() { REST_DARK } else { REST_LIGHT };
             NSColor::colorWithWhite_alpha(white, alpha).setFill();
             for rect in self.control_rects() {
-                NSBezierPath::bezierPathWithOvalInRect(rect).fill();
+                NSBezierPath::bezierPathWithOvalInRect(disc(rect)).fill();
             }
         }
 
@@ -342,6 +347,22 @@ impl WindowControls {
             add(NSWindowDidResignKeyNotification, |view| view.resync(true));
         }
     }
+}
+
+/// The disc a control draws within its frame.
+fn disc(frame: NSRect) -> NSRect {
+    if NSProcessInfo::processInfo()
+        .operatingSystemVersion()
+        .majorVersion
+        >= 26
+    {
+        return frame;
+    }
+    NSInsetRect(
+        frame,
+        (frame.size.width - LEGACY_DISC) / 2.0,
+        (frame.size.height - LEGACY_DISC) / 2.0,
+    )
 }
 
 /// Moves a view's layer to `opacity`, continuing from wherever an unfinished

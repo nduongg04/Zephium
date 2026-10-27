@@ -633,6 +633,13 @@ fn family_entry(
                     entry.roles.contains(&role) || entry.roles.contains(&WorkModelRole::Lead)
                 })
                 .cloned()
+                .map(|entry| {
+                    priced_locally(
+                        entry,
+                        provider == P::Compatible
+                            && compatible_base().is_some_and(|base| is_local(&base)),
+                    )
+                })
         })
 }
 
@@ -1394,7 +1401,17 @@ mod tests {
             .unwrap();
         let free = priced_locally(entry.clone(), true).price.unwrap();
         assert_eq!((free.input, free.cached_input, free.output), (0, 0, 0));
-        assert!(priced_locally(entry, false).price.is_none());
+        assert!(priced_locally(entry.clone(), false).price.is_none());
+        let priced = WorkModelEntry {
+            price: Some(WorkModelPrice {
+                input: 10,
+                cached_input: 5,
+                output: 20,
+            }),
+            ..entry
+        };
+        let price = priced_locally(priced, true).price.unwrap();
+        assert_eq!((price.input, price.cached_input, price.output), (10, 5, 20));
     }
 
     #[derive(Default)]
@@ -1530,6 +1547,37 @@ mod tests {
         assert!(ready(other).await);
         with_keys(&[]);
         assert!(!ready(other).await);
+        // Automatic must use the same local pricing as an explicit choice.
+        let local = models::builtin().into_iter().next().unwrap();
+        let local = WorkModelEntry {
+            id: "compatible/local-model".into(),
+            model: WorkModelRef {
+                provider: P::Compatible,
+                ..local.model
+            },
+            roles: ROLES.to_vec(),
+            price: None,
+            ..local
+        };
+        state().listed.insert(P::Compatible, vec![local]);
+        assert!(store_setting(
+            COMPATIBLE_BASE_KEY.into(),
+            "http://localhost:1234/v1".into()
+        ));
+        for role in ROLES {
+            assert!(stored_choice(&state(), other, role).is_none());
+            let entry = effective(&state(), other, role).unwrap();
+            let price = entry.price.expect("Automatic local models are priced");
+            assert_eq!((price.input, price.cached_input, price.output), (0, 0, 0));
+        }
+        assert!(store_setting(
+            COMPATIBLE_BASE_KEY.into(),
+            "https://models.example.com/v1".into()
+        ));
+        for role in ROLES {
+            assert!(effective(&state(), other, role).unwrap().price.is_none());
+        }
+        assert!(store_setting(COMPATIBLE_BASE_KEY.into(), String::new()));
         // All test secret operations use the injected memory vault.
         vault()
             .store(P::OpenAi, LeadSecret::new("test-key".into()).unwrap())

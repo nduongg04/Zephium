@@ -22,6 +22,23 @@ pub(super) type Timer = Retained<NSTimer>;
 pub(super) type SavePanel = Retained<NSSavePanel>;
 pub(super) type DirectoryPanel = Retained<NSOpenPanel>;
 pub(super) type DialogLease = PanelLease;
+/// What WebKit hands back to continue a stopped download.
+pub(super) type Resume = Retained<NSData>;
+/// Resume data is a small property list; anything bigger is not WebKit's.
+const MAX_RESUME_BYTES: usize = 64 * 1024;
+
+/// Failures a connection or a server can recover from. A refused
+/// credential, a bad certificate or a full disk would only fail again.
+fn resumable_cause(error: DownloadError) -> bool {
+    matches!(
+        error,
+        DownloadError::ConnectionLost
+            | DownloadError::Timeout
+            | DownloadError::Network
+            | DownloadError::Server
+            | DownloadError::Integrity
+    )
+}
 
 pub(super) fn progress(native: &Native) -> Option<(u64, Option<u64>)> {
     let progress = native.progress();
@@ -87,12 +104,170 @@ impl Source {
 }
 
 impl Downloads {
+    /// Continues a download WebKit stopped, from the data it gave back. The
+    /// continuing transfer is a new WKDownload on the same page; it is handed
+    /// the staging folder it was already writing in.
     pub(super) fn resume(
-        &self,
-        _partition: Partition,
-        _id: DownloadId,
+        self: &Rc<Self>,
+        partition: Partition,
+        id: DownloadId,
     ) -> Result<(), DownloadError> {
-        Err(DownloadError::Unsupported)
+        let (data, view) = {
+            let mut active = self.active.borrow_mut();
+            let transfer = active
+                .get_mut(&id)
+                .filter(|transfer| {
+                    transfer.partition == partition
+                        && transfer.record.state == DownloadState::Paused
+                        && !transfer.deadline.expired(Instant::now())
+                        && !transfer.cancelling
+                        && !transfer.resuming
+                        && transfer.destination.is_some()
+                })
+                .ok_or(DownloadError::Invalid)?;
+            let data = transfer.resume.clone().ok_or(DownloadError::Unavailable)?;
+            // The page the download started from is its only way back in;
+            // when it is gone, so is the chance to continue.
+            let view = unsafe { transfer.native.webView() }.ok_or(DownloadError::Unavailable)?;
+            transfer.resuming = true;
+            (data, view)
+        };
+        let weak = Rc::downgrade(self);
+        let started = RcBlock::new(move |download: std::ptr::NonNull<WKDownload>| {
+            let Some(manager) = weak.upgrade() else {
+                return;
+            };
+            // SAFETY: WebKit passes the new, retained WKDownload.
+            let download = unsafe { Retained::retain(download.as_ptr()) };
+            manager.resumed(id, download);
+        });
+        unsafe { view.resumeDownloadFromResumeData_completionHandler(&data, &started) };
+        Ok(())
+    }
+
+    /// The continuing WKDownload exists: it takes over the transfer.
+    fn resumed(self: &Rc<Self>, id: DownloadId, download: Option<Retained<WKDownload>>) {
+        let mtm = MainThreadMarker::new();
+        let profile = {
+            let mut active = self.active.borrow_mut();
+            let Some(transfer) = active.get_mut(&id).filter(|transfer| transfer.resuming) else {
+                if let Some(download) = download {
+                    unsafe { download.cancel(None) };
+                }
+                return;
+            };
+            let (Some(download), Some(mtm)) = (download, mtm) else {
+                transfer.resuming = false;
+                return;
+            };
+            let delegate = DownloadDelegate::new(mtm, Rc::downgrade(self), id);
+            unsafe { download.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
+            transfer.native = download;
+            transfer._delegate = delegate;
+            transfer.resume = None;
+            transfer.record.state = DownloadState::Receiving;
+            transfer.record.error = None;
+            transfer.record.revision += 1;
+            transfer.partition.profile()
+        };
+        self.ensure_timer();
+        (self.notify)(profile);
+    }
+
+    /// The person paused a download. WebKit has no pause: stopping it hands
+    /// back the data to continue from, which is what a pause keeps.
+    pub(super) fn user_pause(
+        self: &Rc<Self>,
+        partition: Partition,
+        id: DownloadId,
+    ) -> Result<(), DownloadError> {
+        let native = {
+            let mut active = self.active.borrow_mut();
+            let transfer = active
+                .get_mut(&id)
+                .filter(|transfer| {
+                    transfer.partition == partition
+                        && may_pause(
+                            transfer.record.state,
+                            transfer.cancelling,
+                            transfer.user_pausing,
+                            transfer.persisting_terminal,
+                            transfer.destination.is_some(),
+                        )
+                })
+                .ok_or(DownloadError::Invalid)?;
+            transfer.user_pausing = true;
+            transfer.native.clone()
+        };
+        let weak = Rc::downgrade(self);
+        let stopped = RcBlock::new(move |data: *mut NSData| {
+            if let Some(manager) = weak.upgrade() {
+                // SAFETY: WebKit passes an autoreleased NSData or null.
+                manager.paused(id, unsafe { Retained::retain(data) });
+            }
+        });
+        unsafe { native.cancel(Some(&stopped)) };
+        Ok(())
+    }
+
+    /// A pause the person asked for has stopped the transfer. Without data to
+    /// continue from there is nothing to keep, and it ends here.
+    fn paused(&self, id: DownloadId, data: Option<Retained<NSData>>) {
+        let data = data.filter(|data| data.len() <= MAX_RESUME_BYTES);
+        let profile = {
+            let mut active = self.active.borrow_mut();
+            let Some(transfer) = active
+                .get_mut(&id)
+                .filter(|transfer| transfer.user_pausing && !transfer.persisting_terminal)
+            else {
+                return;
+            };
+            transfer.user_pausing = false;
+            let Some(data) = data.filter(|_| !transfer.cancelling) else {
+                drop(active);
+                self.terminal(id, DownloadState::Failed, Some(DownloadError::Unavailable));
+                return;
+            };
+            transfer.resume = Some(data);
+            transfer.record.state = DownloadState::Paused;
+            transfer.record.error = None;
+            transfer.deadline = DecisionDeadline::new(DecisionPhase::UserPaused, Instant::now());
+            transfer.record.revision += 1;
+            transfer.partition.profile()
+        };
+        self.persist(id);
+        (self.notify)(profile);
+    }
+
+    /// WebKit stopped a transfer and kept what it needs to continue. A
+    /// failure a connection can recover from becomes a pause the person can
+    /// resume, as on Windows; any other ends the transfer.
+    fn interrupted(&self, id: DownloadId, error: DownloadError, data: Retained<NSData>) -> bool {
+        if !resumable_cause(error) || data.len() > MAX_RESUME_BYTES {
+            return false;
+        }
+        let profile = {
+            let mut active = self.active.borrow_mut();
+            let Some(transfer) = active.get_mut(&id).filter(|transfer| {
+                transfer.record.state == DownloadState::Receiving
+                    && !transfer.cancelling
+                    && !transfer.user_pausing
+                    && !transfer.persisting_terminal
+                    && transfer.destination.is_some()
+            }) else {
+                return false;
+            };
+            transfer.resume = Some(data);
+            transfer.record.state = DownloadState::Paused;
+            transfer.record.error = Some(error);
+            transfer.deadline =
+                DecisionDeadline::new(DecisionPhase::ResumableInterruption, Instant::now());
+            transfer.record.revision += 1;
+            transfer.partition.profile()
+        };
+        self.persist(id);
+        (self.notify)(profile);
+        true
     }
     pub(super) fn ensure_timer(self: &Rc<Self>) {
         let (period, slow) = self.tick_period();
@@ -273,6 +448,10 @@ impl Downloads {
                 authorized: false,
                 cancelling: false,
                 persisting_terminal: false,
+                kept: false,
+                user_pausing: false,
+                resume: None,
+                resuming: false,
                 deadline: DecisionDeadline::new(DecisionPhase::Admission, Instant::now()),
             },
         );
@@ -288,6 +467,28 @@ impl Downloads {
         suggested: &NSString,
         completion: &Block<dyn Fn(*mut NSURL)>,
     ) {
+        // A continuing download asks again where its file goes: back into the
+        // staging folder it was already writing in.
+        let continuing = self.active.borrow_mut().get_mut(&id).and_then(|transfer| {
+            if !transfer.resuming {
+                return None;
+            }
+            transfer.resuming = false;
+            transfer
+                .destination
+                .as_ref()
+                .filter(|_| !transfer.cancelling)
+                .map(|destination| destination.payload())
+        });
+        if let Some(path) = continuing {
+            let url = path
+                .to_str()
+                .map(|path| NSURL::fileURLWithPath(&NSString::from_str(path)));
+            completion.call((url
+                .as_ref()
+                .map_or(std::ptr::null_mut(), |url| Retained::as_ptr(url).cast_mut()),));
+            return;
+        }
         let name = bounded(suggested, 4096)
             .map(|value| safe_filename(&value))
             .unwrap_or_else(|| "download".into());
@@ -457,6 +658,16 @@ impl Downloads {
                 || transfer.record.state == DownloadState::Finalizing
                 || transfer.cancelling
             {
+                return;
+            }
+            // A held file is complete and a paused one has stopped: neither
+            // has a native operation left to answer a cancellation.
+            if matches!(
+                transfer.record.state,
+                DownloadState::Held | DownloadState::Paused
+            ) {
+                drop(active);
+                self.terminal(id, DownloadState::Cancelled, error);
                 return;
             }
             transfer.cancelling = true;
@@ -781,7 +992,7 @@ define_class!(
             }
         }
         #[unsafe(method(download:didFailWithError:resumeData:))]
-        unsafe fn failed(&self, _download: &WKDownload, error: &NSError, _resume: Option<&NSData>) {
+        unsafe fn failed(&self, _download: &WKDownload, error: &NSError, resume: Option<&NSData>) {
             if let Some(manager) = self.ivars().manager.upgrade() {
                 let cause = download_error(error);
                 // Static domain classes and numeric codes only; never descriptions,
@@ -790,6 +1001,12 @@ define_class!(
                     "downloads: native failure cause={cause:?} codes={:?}",
                     native_error_codes(error)
                 );
+                // A failure WebKit can continue from waits to be resumed.
+                if resume.is_some_and(|data| {
+                    manager.interrupted(*self.ivars().id, cause, Retained::from(data))
+                }) {
+                    return;
+                }
                 manager.native_failed_with_error(*self.ivars().id, cause);
             }
         }
@@ -847,6 +1064,31 @@ impl DownloadDelegate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_failures_a_retry_can_cure_are_kept_to_resume() {
+        for error in [
+            DownloadError::ConnectionLost,
+            DownloadError::Timeout,
+            DownloadError::Network,
+            DownloadError::Server,
+            DownloadError::Integrity,
+        ] {
+            assert!(resumable_cause(error), "{error:?}");
+        }
+        for error in [
+            DownloadError::Authentication,
+            DownloadError::Certificate,
+            DownloadError::DiskFull,
+            DownloadError::Permission,
+            DownloadError::Destination,
+            DownloadError::Cancelled,
+            DownloadError::Runtime,
+            DownloadError::Source,
+        ] {
+            assert!(!resumable_cause(error), "{error:?}");
+        }
+    }
+
     #[test]
     fn objc_delegate_ivars_fit_the_native_alignment_limit() {
         assert!(std::mem::align_of::<DelegateIvars>() <= std::mem::align_of::<usize>());

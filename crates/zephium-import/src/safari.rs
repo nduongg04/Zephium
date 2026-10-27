@@ -15,15 +15,14 @@ fn root(locations: &Locations) -> PathBuf {
     locations.home.join("Library").join("Safari")
 }
 
-pub(crate) fn source(locations: &Locations) -> Option<Source> {
+/// Safari ships with every Mac. Its files are opened only once the person
+/// imports from it: touching them while listing sources makes macOS warn that
+/// Zephium tried to read another app's data. Missing access surfaces then, as
+/// `ImportError::Permission`.
+pub(crate) fn source(_locations: &Locations) -> Option<Source> {
     if !cfg!(target_os = "macos") {
         return None;
     }
-    let needs_permission = match std::fs::File::open(root(locations).join("Bookmarks.plist")) {
-        Ok(_) => false,
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => true,
-        Err(_) => return None,
-    };
     Some(Source {
         browser: crate::Browser::Safari,
         profiles: vec![Profile {
@@ -33,7 +32,7 @@ pub(crate) fn source(locations: &Locations) -> Option<Source> {
             history: true,
             essentials: false,
         }],
-        needs_permission,
+        needs_permission: false,
     })
 }
 

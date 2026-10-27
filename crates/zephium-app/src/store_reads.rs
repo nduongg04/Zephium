@@ -9,6 +9,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
 use zephium_core::bookmarks::{BookmarkFailure, BookmarkNode, BookmarkReply, BookmarkRequest};
+use zephium_core::export::{ExportKind, HISTORY_CSV_HEADER, MAX_EXPORT_VISITS};
 use zephium_core::ids::{ItemId, ProfileId, SpaceId};
 use zephium_core::item::sanitize_page_title;
 use zephium_core::ports::store::HistoryHit;
@@ -29,6 +30,78 @@ fn now_secs() -> i64 {
         .map_or(0, |elapsed| elapsed.as_secs() as i64)
 }
 
+/// Reads the icon of an origin and, when named, of one page of it. Both come
+/// with whether they are old enough to be asked of the renderer again.
+pub(crate) fn read_favicon(
+    store: &dyn zephium_core::ports::store::Store,
+    generation: u64,
+    id: ItemId,
+    profile: ProfileId,
+    origin: String,
+    page: Option<String>,
+) -> StoreReadResult {
+    let read = |key: &str| {
+        let stored = store
+            .favicon_raster_with_age(profile, key)
+            .filter(|(bytes, _)| icon::validated_rgba32(bytes).is_some());
+        StoredIcon {
+            stale: stored
+                .as_ref()
+                .is_none_or(|(_, age)| *age > FAVICON_CACHE_MAX_AGE_SECONDS),
+            rgba: stored.map(|(bytes, _)| bytes),
+        }
+    };
+    let icon = read(&origin);
+    let page = page.map(|key| {
+        let icon = read(&key);
+        Box::new(PageFavicon { key, icon })
+    });
+    StoreReadResult::Favicon {
+        generation,
+        id,
+        profile,
+        origin,
+        icon,
+        page,
+    }
+}
+
+/// A stored raster, and whether it is older than the refresh window or absent.
+#[derive(Clone, Debug)]
+pub struct StoredIcon {
+    pub rgba: Option<Vec<u8>>,
+    pub stale: bool,
+}
+
+/// What the store held for one page of an origin whose icon was asked for.
+#[derive(Clone, Debug)]
+pub struct PageFavicon {
+    pub key: String,
+    pub icon: StoredIcon,
+}
+
+/// What a launcher read looks through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sources {
+    pub history: bool,
+    pub bookmarks: bool,
+}
+
+#[cfg(test)]
+impl Sources {
+    pub const HISTORY: Self = Self {
+        history: true,
+        bookmarks: false,
+    };
+}
+
+/// A saved page that matched what was typed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BookmarkHit {
+    pub title: String,
+    pub url: String,
+}
+
 #[derive(Clone, Debug)]
 pub enum StoreReadResult {
     History {
@@ -36,15 +109,16 @@ pub enum StoreReadResult {
         profile: ProfileId,
         query: String,
         hits: Vec<HistoryHit>,
+        bookmarks: Vec<BookmarkHit>,
     },
     Favicon {
         generation: u64,
         id: ItemId,
         profile: ProfileId,
         origin: String,
-        rgba: Option<Vec<u8>>,
-        /// The stored copy is older than the refresh window, or absent.
-        stale: bool,
+        icon: StoredIcon,
+        /// The page's own icon, when the request named a page.
+        page: Option<Box<PageFavicon>>,
     },
     FaviconBatch {
         generation: u64,
@@ -80,6 +154,11 @@ pub enum StoreReadResult {
     Imported {
         token: u64,
         added: Option<u32>,
+    },
+    /// The file an export produced, or None when the store could not read it.
+    Exported {
+        token: u64,
+        text: Option<String>,
     },
 }
 
@@ -130,12 +209,14 @@ enum Request {
         generation: u64,
         profile: ProfileId,
         query: String,
+        sources: Sources,
     },
     Favicon {
         generation: u64,
         id: ItemId,
         profile: ProfileId,
         origin: String,
+        page: Option<String>,
     },
     FaviconBatch {
         generation: u64,
@@ -162,6 +243,11 @@ enum Request {
         token: u64,
         profile: ProfileId,
         work: ImportWork,
+    },
+    Export {
+        token: u64,
+        profile: ProfileId,
+        kind: ExportKind,
     },
 }
 
@@ -223,6 +309,7 @@ impl StoreReadQueue {
         generation: u64,
         profile: ProfileId,
         query: String,
+        sources: Sources,
     ) -> bool {
         if query.len() > MAX_SEARCH_QUERY_BYTES {
             return false;
@@ -239,6 +326,7 @@ impl StoreReadQueue {
             generation,
             profile,
             query,
+            sources,
         });
         self.inner.ready.notify_one();
         true
@@ -327,12 +415,34 @@ impl StoreReadQueue {
         true
     }
 
+    pub(crate) fn request_export(&self, token: u64, profile: ProfileId, kind: ExportKind) -> bool {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.stopped
+            || !state.accepting
+            || state.surface_calls.len() >= MAX_PENDING_SURFACE_CALLS
+        {
+            return false;
+        }
+        state.surface_calls.push_back(Request::Export {
+            token,
+            profile,
+            kind,
+        });
+        self.inner.ready.notify_one();
+        true
+    }
+
     pub(crate) fn request_favicon(
         &self,
         generation: u64,
         id: ItemId,
         profile: ProfileId,
         origin: String,
+        page: Option<String>,
     ) -> bool {
         let mut state = self
             .inner
@@ -350,6 +460,7 @@ impl StoreReadQueue {
                     id,
                     profile,
                     origin,
+                    page,
                 },
             );
         } else {
@@ -363,6 +474,7 @@ impl StoreReadQueue {
                     id,
                     profile,
                     origin,
+                    page,
                 },
             );
             state.favicon_order.push_back(id);
@@ -601,6 +713,55 @@ pub(crate) fn run_for_test(
 /// searches and already-open tabs can be filtered out without leaving the
 /// history section short.
 const HISTORY_READ_LIMIT: u32 = 10;
+const BOOKMARK_READ_LIMIT: usize = 10;
+
+/// Visited pages and saved pages for the launcher, vetted before they leave
+/// the worker: only allowed addresses, titles with their controls stripped.
+pub(crate) fn read_suggestions(
+    store: &dyn zephium_core::ports::store::Store,
+    profile: ProfileId,
+    query: &str,
+    sources: Sources,
+) -> (Vec<HistoryHit>, Vec<BookmarkHit>) {
+    let hits = if sources.history {
+        store
+            .search_history(profile, query, HISTORY_READ_LIMIT)
+            .into_iter()
+            .take(HISTORY_READ_LIMIT as usize)
+            .filter(|hit| navigation::is_allowed_str(&hit.url))
+            .map(|mut hit| {
+                hit.title = sanitize_page_title(&hit.title);
+                hit
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let bookmarks = if sources.bookmarks {
+        match store.bookmarks(
+            profile,
+            BookmarkRequest::Search {
+                query: query.to_owned(),
+            },
+        ) {
+            BookmarkReply::Nodes(nodes) => nodes
+                .into_iter()
+                .filter_map(|node| {
+                    let url = node.url?;
+                    navigation::is_allowed_str(&url).then(|| BookmarkHit {
+                        title: sanitize_page_title(&node.title),
+                        url,
+                    })
+                })
+                .take(BOOKMARK_READ_LIMIT)
+                .collect(),
+            _ => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+    (hits, bookmarks)
+}
 
 fn bookmark_work(
     store: &dyn zephium_core::ports::store::Store,
@@ -718,6 +879,43 @@ fn bookmark_work(
     result.unwrap_or_else(BookmarkSurfaceReply::Failed)
 }
 
+/// Visits fetched per store call, the most a history page returns.
+const EXPORT_PAGE: u32 = 200;
+
+/// The file for an export, or None when the store could not be read.
+fn export_text(
+    store: &dyn zephium_core::ports::store::Store,
+    profile: ProfileId,
+    kind: ExportKind,
+) -> Option<String> {
+    match kind {
+        ExportKind::Bookmarks => match store.bookmarks(profile, BookmarkRequest::All) {
+            BookmarkReply::Nodes(nodes) => Some(zephium_core::export::bookmarks_html(&nodes)),
+            _ => None,
+        },
+        ExportKind::History => {
+            let mut text = String::from(HISTORY_CSV_HEADER);
+            let (mut before, mut exported) = (None, 0);
+            while exported < MAX_EXPORT_VISITS {
+                let mut visits = store.history_page(profile, "", None, before, EXPORT_PAGE);
+                // The store answers a call it could not serve in time with no
+                // visits, which a real end also is. Ask once more before
+                // believing it, so a stall does not end the file early.
+                if visits.is_empty() {
+                    visits = store.history_page(profile, "", None, before, EXPORT_PAGE);
+                }
+                zephium_core::export::push_history_rows(&visits, &mut text);
+                exported += visits.len();
+                match visits.last() {
+                    Some(last) if visits.len() == EXPORT_PAGE as usize => before = Some(last.id),
+                    _ => break,
+                }
+            }
+            Some(text)
+        }
+    }
+}
+
 pub(crate) fn run(store: SharedStore, queue: StoreReadQueue, callback: CallbackHandle) {
     run_with(store, queue, move |result| {
         callback.dispatch(Command::StoreRead(result))
@@ -738,21 +936,17 @@ fn run_with(
                 generation,
                 profile,
                 query,
-            } => StoreReadResult::History {
-                generation,
-                profile,
-                hits: store
-                    .search_history(profile, &query, HISTORY_READ_LIMIT)
-                    .into_iter()
-                    .take(HISTORY_READ_LIMIT as usize)
-                    .filter(|hit| navigation::is_allowed_str(&hit.url))
-                    .map(|mut hit| {
-                        hit.title = sanitize_page_title(&hit.title);
-                        hit
-                    })
-                    .collect(),
-                query,
-            },
+                sources,
+            } => {
+                let (hits, bookmarks) = read_suggestions(&*store, profile, &query, sources);
+                StoreReadResult::History {
+                    generation,
+                    profile,
+                    query,
+                    hits,
+                    bookmarks,
+                }
+            }
             Request::HistorySurface {
                 token,
                 profile,
@@ -789,8 +983,15 @@ fn run_with(
                     next: None,
                     removed: Some(store.forget_history_urls(profile, &urls)),
                 },
-                zephium_ipc::HistoryCall::Clear { range } => {
-                    let since = range.window_seconds().map(|window| now_secs() - window);
+                call @ (zephium_ipc::HistoryCall::Clear { .. }
+                | zephium_ipc::HistoryCall::ClearSince { .. }) => {
+                    let since = match call {
+                        zephium_ipc::HistoryCall::ClearSince { since } => Some(since),
+                        zephium_ipc::HistoryCall::Clear { range } => {
+                            range.window_seconds().map(|window| now_secs() - window)
+                        }
+                        _ => unreachable!(),
+                    };
                     store.clear_chats(profile, since);
                     match store.clear_history_checked(profile, since) {
                         Some(removed) => StoreReadResult::HistorySurface {
@@ -802,6 +1003,11 @@ fn run_with(
                         },
                         None => StoreReadResult::HistorySurfaceFailed { token, profile },
                     }
+                }
+                // The shell answers these itself; the store holds nothing of them.
+                zephium_ipc::HistoryCall::ClosedTabs
+                | zephium_ipc::HistoryCall::ReopenClosed { .. } => {
+                    StoreReadResult::HistorySurfaceFailed { token, profile }
                 }
             },
             Request::Bookmarks {
@@ -832,27 +1038,21 @@ fn run_with(
                     ImportWork::Essentials(_) => None,
                 },
             },
+            Request::Export {
+                token,
+                profile,
+                kind,
+            } => StoreReadResult::Exported {
+                token,
+                text: export_text(&*store, profile, kind),
+            },
             Request::Favicon {
                 generation,
                 id,
                 profile,
                 origin,
-            } => {
-                let stored = store
-                    .favicon_raster_with_age(profile, &origin)
-                    .filter(|(bytes, _)| icon::validated_rgba32(bytes).is_some());
-                let stale = stored
-                    .as_ref()
-                    .is_none_or(|(_, age)| *age > FAVICON_CACHE_MAX_AGE_SECONDS);
-                StoreReadResult::Favicon {
-                    generation,
-                    id,
-                    profile,
-                    origin,
-                    rgba: stored.map(|(bytes, _)| bytes),
-                    stale,
-                }
-            }
+                page,
+            } => read_favicon(&*store, generation, id, profile, origin, page),
             Request::FaviconBatch {
                 generation,
                 profile,
@@ -935,16 +1135,28 @@ mod tests {
     fn clearing_history_also_clears_conversations_from_the_same_instant() {
         let store = Arc::new(crate::shell::tests::FakeStore::default());
         let profile = ProfileId::from(1);
-        for (range, window) in [
-            (zephium_ipc::HistoryRange::Hour, Some(3600)),
-            (zephium_ipc::HistoryRange::Everything, None),
+        for (call, window) in [
+            (
+                zephium_ipc::HistoryCall::Clear {
+                    range: zephium_ipc::HistoryRange::Hour,
+                },
+                Some(3600),
+            ),
+            (
+                zephium_ipc::HistoryCall::Clear {
+                    range: zephium_ipc::HistoryRange::Everything,
+                },
+                None,
+            ),
+            (
+                zephium_ipc::HistoryCall::ClearSince {
+                    since: now_secs() - 28 * 24 * 3600,
+                },
+                Some(28 * 24 * 3600),
+            ),
         ] {
             let queue = StoreReadQueue::new();
-            assert!(queue.request_history_call(
-                7,
-                profile,
-                zephium_ipc::HistoryCall::Clear { range }
-            ));
+            assert!(queue.request_history_call(7, profile, call));
             let before = now_secs();
             let mut result = None;
             let stop = queue.clone();
@@ -980,8 +1192,8 @@ mod tests {
     fn latest_search_replaces_pending_without_growing_a_fifo() {
         let queue = StoreReadQueue::new();
         let profile = ProfileId::from(1);
-        assert!(queue.request_history(1, profile, "old".into()));
-        assert!(queue.request_history(2, profile, "new".into()));
+        assert!(queue.request_history(1, profile, "old".into(), Sources::HISTORY));
+        assert!(queue.request_history(2, profile, "new".into(), Sources::HISTORY));
 
         let mut lease = queue.recv().unwrap();
         assert!(matches!(
@@ -1003,20 +1215,23 @@ mod tests {
                 raw as u64,
                 ItemId::from(raw),
                 profile,
-                format!("https://{raw}.example")
+                format!("https://{raw}.example"),
+                None
             ));
         }
         assert!(queue.request_favicon(
             999,
             ItemId::from(1),
             profile,
-            "https://replacement.example".into()
+            "https://replacement.example".into(),
+            Some("https://replacement.example/page".into())
         ));
         assert!(!queue.request_favicon(
             1000,
             ItemId::from(999),
             profile,
-            "https://overflow.example".into()
+            "https://overflow.example".into(),
+            None
         ));
     }
 
@@ -1030,7 +1245,8 @@ mod tests {
                 generation,
                 id,
                 profile,
-                format!("https://{generation}.example")
+                format!("https://{generation}.example"),
+                None
             ));
             queue.cancel_favicon(id);
         }
@@ -1042,17 +1258,17 @@ mod tests {
     #[test]
     fn quiescence_clears_pending_and_can_resume_after_retryable_shutdown() {
         let queue = StoreReadQueue::new();
-        assert!(queue.request_history(1, ProfileId::from(1), "pending".into()));
+        assert!(queue.request_history(1, ProfileId::from(1), "pending".into(), Sources::HISTORY));
         assert!(queue.quiesce_until(Instant::now()));
-        assert!(!queue.request_history(2, ProfileId::from(1), "rejected".into()));
+        assert!(!queue.request_history(2, ProfileId::from(1), "rejected".into(), Sources::HISTORY));
         queue.resume();
-        assert!(queue.request_history(3, ProfileId::from(1), "accepted".into()));
+        assert!(queue.request_history(3, ProfileId::from(1), "accepted".into(), Sources::HISTORY));
     }
 
     #[test]
     fn quiescence_deadline_cannot_claim_an_in_flight_read_is_finished() {
         let queue = StoreReadQueue::new();
-        assert!(queue.request_history(1, ProfileId::from(1), "active".into()));
+        assert!(queue.request_history(1, ProfileId::from(1), "active".into(), Sources::HISTORY));
         let lease = queue.recv().unwrap();
         assert!(!queue.quiesce_until(Instant::now() + std::time::Duration::from_millis(1)));
         drop(lease);

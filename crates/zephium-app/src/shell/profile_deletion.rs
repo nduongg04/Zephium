@@ -226,8 +226,11 @@ impl Shell {
     /// profile erasure owns closure and exact retirement of every view.
     pub(super) fn apply_profile_tombstone(&mut self, profile: ProfileId) {
         self.engine.forget_discarded_state(profile, None);
+        self.continued_certificates
+            .retain(|(owner, _)| *owner != profile);
         self.recently_closed
             .retain(|entry| entry.profile != profile);
+        self.zoom.forget_profile(profile);
         self.extension_browser_surfaces.retire_profile(profile);
         self.extension_actions.retire_profile(profile);
         // Retire compiler admission and erase any callback result before the
@@ -241,19 +244,19 @@ impl Shell {
             .favicons
             .icon_attempts
             .iter()
-            .filter_map(|(id, attempt)| (attempt.profile == profile).then_some(*id))
+            .filter_map(|(id, attempt)| (attempt.target.profile == profile).then_some(*id))
             .collect();
-        favicon_items.extend(
-            self.favicons
-                .icon_load_completion_pending
-                .iter()
-                .filter_map(|(id, (item_profile, _))| (*item_profile == profile).then_some(*id)),
-        );
         favicon_items.extend(
             self.favicons
                 .store_reads
                 .iter()
-                .filter_map(|(id, pending)| (pending.profile == profile).then_some(*id)),
+                .filter_map(|(id, pending)| (pending.target.profile == profile).then_some(*id)),
+        );
+        favicon_items.extend(
+            self.favicons
+                .settled
+                .iter()
+                .filter_map(|(id, target)| (target.profile == profile).then_some(*id)),
         );
         for id in favicon_items {
             self.cancel_favicon_attempt(id);
@@ -301,6 +304,11 @@ impl Shell {
             .icons_checked
             .retain(|(item_profile, _)| *item_profile != profile);
         self.favicons
+            .icon_sources
+            .retain(|(item_profile, _), _| *item_profile != profile);
+        self.favicons.failed.forget_profile(profile);
+        self.favicons.unfetched.forget_profile(profile);
+        self.favicons
             .icon_values
             .retain(|(item_profile, _), _| *item_profile != profile);
         self.favicons
@@ -326,8 +334,6 @@ impl Shell {
         // The authorization transaction already published the exact session.
         // An older debounce must never later overwrite that barrier.
         self.persistence.persist_first_dirty = None;
-        self.persistence.url_checkpoint_dirty.clear();
-        self.persistence.last_url_checkpoint = std::time::Instant::now();
         if let Some(queue) = &self.self_queue {
             queue.cancel_persist();
         }

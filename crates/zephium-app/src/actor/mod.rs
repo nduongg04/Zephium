@@ -960,6 +960,23 @@ impl Handle {
         }
         receiver
     }
+    pub fn site_permissions(
+        &self,
+        origin: Option<zephium_core::permissions::PageOrigin>,
+    ) -> std::sync::mpsc::Receiver<Option<zephium_ipc::SitePermissionsView>> {
+        let (reply, receiver) = sync_channel(1);
+        if let Err(
+            TryPushError::Full(command)
+            | TryPushError::Sealed(command)
+            | TryPushError::Closed(command),
+        ) = self
+            .queue
+            .try_push(Command::SitePermissions { origin, reply })
+        {
+            finish_unprocessed_command(command, ShutdownOutcome::Unclean);
+        }
+        receiver
+    }
     pub fn focused_content_policy_status(&self) -> FocusedContentPolicyStatusRequest {
         let (reply, receiver) = sync_channel(1);
         let command = Command::FocusedContentPolicyStatus { reply };
@@ -1219,6 +1236,9 @@ fn finish_unprocessed_command(command: Command, outcome: ShutdownOutcome) {
         Command::BlockerStatistics { reply, .. } => {
             let _ = reply.try_send(None);
         }
+        Command::SitePermissions { reply, .. } => {
+            let _ = reply.try_send(None);
+        }
         Command::FocusedContentPolicyStatus { reply } => {
             let _ = reply.send(BlockerStatusView::unavailable());
         }
@@ -1260,8 +1280,11 @@ fn tracked_operation_command(command: &Command) -> bool {
             | Command::Navigate { .. }
             | Command::Reload(_)
             | Command::AnswerPageRequest { .. }
+            | Command::AnswerHttpAuth { .. }
+            | Command::ContinuePastCertificate(_)
             | Command::GoBack(_)
             | Command::GoForward(_)
+            | Command::GoToHistoryEntry { .. }
             | Command::SplitWith { .. }
             | Command::Unsplit
             | Command::LeaveSplit(_)
@@ -1273,7 +1296,10 @@ fn tracked_operation_command(command: &Command) -> bool {
             | Command::RunSearchAction { .. }
             | Command::InvokeExtensionAction { .. }
             | Command::RespondToPagePermissionPrompt { .. }
+            | Command::SetSitePermission { .. }
             | Command::StopMediaCapture { .. }
+            | Command::SetTabMuted { .. }
+            | Command::MediaPlayer { .. }
             | Command::OpenUrl { .. }
             | Command::SetAppSetting { .. }
             | Command::Focus(_)
@@ -1610,6 +1636,13 @@ fn spawn_suspended_with_worker_spawner<Agent: PendingAgentLifecycle>(
                     Err(TryPushError::Full(_)) => timer_queue.schedule_focus(Some(
                         std::time::Instant::now() + std::time::Duration::from_millis(25),
                     )),
+                    Err(TryPushError::Closed(_)) => break,
+                },
+                TimerWake::Audio => match timer_queue.try_push(Command::AudioWake) {
+                    Ok(()) | Err(TryPushError::Sealed(_)) => {}
+                    Err(TryPushError::Full(_)) => timer_queue.schedule_audio(
+                        std::time::Instant::now() + std::time::Duration::from_millis(25),
+                    ),
                     Err(TryPushError::Closed(_)) => break,
                 },
                 TimerWake::Persist => match timer_queue.try_push(Command::Persist) {

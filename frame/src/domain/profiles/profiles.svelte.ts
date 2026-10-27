@@ -10,6 +10,7 @@ import {
   type ProfilesView,
 } from "$shared/ipc/bindings";
 import { events } from "$shared/ipc/native-events";
+import { forgetDrafts } from "$shared/lib/drafts";
 import { observe } from "$shared/lib/observe";
 import { settle, type Settlement } from "$domain/operations";
 
@@ -22,6 +23,10 @@ export const all = (): ProfileEntryView[] => view?.profiles ?? [];
 export const current = (): ProfileEntryView | null =>
   view?.profiles.find((profile) => profile.id === view?.current) ?? null;
 export const inPrivate = () => view?.private ?? false;
+/** The tabs of the private window while one exists, in front or set aside. */
+export const privateTabs = (): number | null => view?.private_tabs ?? null;
+/** A private window exists and the window is showing the regular tabs. */
+export const privateAside = () => privateTabs() !== null && !inPrivate();
 /** The profiles a window could switch to from here. */
 export const others = (): ProfileEntryView[] =>
   all().filter((profile) => profile.id !== view?.current);
@@ -78,7 +83,9 @@ export const setAvatar = async (id: string, avatar: AvatarDraft) =>
 /** Deletion settles once its native and durable phases both finish. */
 export const remove = async (id: string) => {
   const result = await settle(commands.profilesDelete(id), 30_000);
-  return applied(result) || result.outcome === "deferred";
+  const removed = applied(result) || result.outcome === "deferred";
+  if (removed) forgetDrafts(id);
+  return removed;
 };
 
 export type PhotoPick = { token: string } | "cancelled" | "unsupported" | "unavailable";

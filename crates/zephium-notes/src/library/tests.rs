@@ -124,6 +124,21 @@ fn a_new_note_is_a_file_named_after_its_title() {
 }
 
 #[test]
+fn a_device_name_with_an_extension_can_be_created_and_read() {
+    let (_base, mut library) = library();
+    let note = create(&mut library, 1, "# COM1.txt\n\nKeep this content.");
+    assert_eq!(note.path, "COM1 note.txt.md");
+    assert_eq!(note.title, "COM1.txt");
+    assert_eq!(
+        on_disk(&library, &note.path),
+        "# COM1.txt\n\nKeep this content."
+    );
+    let second = create(&mut library, 2, "# COM1.txt\n\nA second note.");
+    assert_eq!(second.path, "COM1 note.txt 2.md");
+    assert_ne!(note.id, second.id);
+}
+
+#[test]
 fn writes_prove_the_version_they_edited() {
     let (_base, mut library) = library();
     let note = create(&mut library, 1, "# Plans\n\nOne");

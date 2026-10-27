@@ -15,6 +15,7 @@ const native = vi.hoisted(() => ({ settings: {} as Record<string, string> }));
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
   return mockBindings({
+    pagePermissionCardHost: async () => {},
     tabsBootstrap: async () => {},
     sidebarSetWidth: async () => {},
     sidebarResize: async () => false,

@@ -7106,6 +7106,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-foundation",
+ "objc2-security",
  "objc2-ui-kit",
  "objc2-web-kit",
  "once_cell",
@@ -7473,6 +7474,7 @@ dependencies = [
  "ulid",
  "url",
  "winreg",
+ "zeroize",
 ]
 
 [[package]]
@@ -7580,6 +7582,7 @@ dependencies = [
  "objc2-authentication-services",
  "objc2-core-foundation",
  "objc2-core-graphics",
+ "objc2-core-location",
  "objc2-foundation",
  "objc2-quartz-core",
  "objc2-security",

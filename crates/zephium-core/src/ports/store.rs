@@ -51,6 +51,8 @@ pub struct ChatSummary {
 }
 
 /// Conversations kept per profile; saving a new one past this drops the oldest.
+/// Sites one profile may let open new tabs without a click.
+pub const MAX_POPUP_SITES: usize = 512;
 pub const MAX_CHATS: usize = 200;
 /// A conversation id is 1 to this many bytes of `[A-Za-z0-9-]`.
 pub const MAX_CHAT_ID_BYTES: usize = 40;
@@ -626,7 +628,9 @@ pub trait Store {
     }
     /// Replaces the placeholder title on the newest recent visit to an address.
     fn amend_visit_title(&self, profile: ProfileId, url: String, title: String) -> bool;
-    /// Age in seconds of the cached icon for a page origin, None when absent.
+    /// Age in seconds of the cached icon for a favicon key, None when absent.
+    /// A key is a page origin, or one page of it (`icon::page_key`) whose own
+    /// icon differs from its origin's.
     fn favicon_age(&self, profile: ProfileId, origin: &str) -> Option<i64>;
     fn save_favicon(
         &self,
@@ -636,6 +640,8 @@ pub trait Store {
         bytes: Vec<u8>,
     );
     fn favicon_bytes(&self, profile: ProfileId, origin: &str) -> Option<(Option<String>, Vec<u8>)>;
+    /// Drops the icon kept for one page, as when it now matches its origin's.
+    fn forget_page_favicon(&self, _profile: ProfileId, _page: String) {}
 
     /// Loads one already-decoded favicon with the age of the stored copy.
     /// Age decides whether to refresh, never whether to display: an old
@@ -662,6 +668,23 @@ pub trait Store {
                     .map(|(_, bytes)| (origin.clone(), bytes))
             })
             .collect()
+    }
+
+    /// The page zoom a profile saved per site, newest first.
+    fn zoom_levels(&self, _profile: ProfileId) -> Vec<crate::zoom::SavedLevel> {
+        Vec::new()
+    }
+    /// Saves a site's page zoom, or forgets it when `percent` is none. The
+    /// oldest sites beyond `zoom::MAX_SITE_LEVELS` are dropped. False when
+    /// not admitted. Clearing history clears the levels it covers.
+    fn save_zoom_level(
+        &self,
+        _profile: ProfileId,
+        _site: String,
+        _percent: Option<u16>,
+        _set_at: i64,
+    ) -> bool {
+        false
     }
 
     /// Assistant conversations, newest first, at most `limit` (never more than
@@ -697,6 +720,21 @@ pub trait Store {
     /// them when it is absent. Returns how many went.
     fn clear_chats(&self, _profile: ProfileId, _since: Option<i64>) -> u32 {
         0
+    }
+    /// The sites `profile` lets open new tabs without a click, or None when
+    /// they cannot be read.
+    fn popup_sites(&self, _profile: ProfileId) -> Option<Vec<crate::permissions::PageOrigin>> {
+        None
+    }
+    /// Adds or removes one site from that list. False when nothing was
+    /// written, including when the list is full.
+    fn set_popup_site(
+        &self,
+        _profile: ProfileId,
+        _origin: crate::permissions::PageOrigin,
+        _allowed: bool,
+    ) -> bool {
+        false
     }
 
     /// Returns the bounded, durable deletion work that survived the previous

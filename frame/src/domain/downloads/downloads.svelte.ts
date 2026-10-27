@@ -217,7 +217,14 @@ export class DownloadSession {
       } else if (call.kind === "clear") {
         this.entries = this.entries.filter((entry) => !finished(entry));
         await this.reload();
-      } else if (call.kind === "forget" || call.kind === "cancel" || call.kind === "resume") {
+      } else if (
+        call.kind === "forget" ||
+        call.kind === "cancel" ||
+        call.kind === "resume" ||
+        call.kind === "pause" ||
+        call.kind === "keep" ||
+        call.kind === "discard"
+      ) {
         await this.reload();
       }
     } catch {

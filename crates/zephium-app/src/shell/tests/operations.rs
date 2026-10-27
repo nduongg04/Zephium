@@ -373,6 +373,38 @@ fn tab_close_command_closes_extensions_tab() {
 }
 
 #[test]
+fn home_opens_a_new_tab_until_there_is_a_home_page_then_goes_there_in_the_front_tab() {
+    let (mut shell, engine, screen) = setup();
+    shell.handle(Command::Bootstrap);
+    let first = active_id(&screen);
+    navigate_and_commit(&mut shell, first, "example.com");
+    let tabs = last(&screen).tabs.len();
+
+    let _disposition = shell.operation_run_command("nav.home");
+    assert_eq!(last(&screen).tabs.len(), tabs + 1);
+    assert_ne!(active_id(&screen), first);
+
+    shell.handle(Command::SetAppSetting {
+        key: "tabs.home".into(),
+        value: "home.example.org".into(),
+    });
+    let front = active_id(&screen);
+    let _disposition = shell.operation_run_command("nav.home");
+    assert_eq!(last(&screen).tabs.len(), tabs + 1);
+    assert!(engine
+        .calls()
+        .iter()
+        .any(|call| call == &format!("create {front} https://home.example.org/ [default]")));
+
+    shell.handle(Command::SetAppSetting {
+        key: "tabs.home".into(),
+        value: "".into(),
+    });
+    let _disposition = shell.operation_run_command("nav.home");
+    assert_eq!(last(&screen).tabs.len(), tabs + 2);
+}
+
+#[test]
 fn tab_close_on_a_window_page_closes_the_page_not_the_tab_behind_it() {
     let (mut shell, engine, screen) = setup();
     shell.handle(Command::Bootstrap);

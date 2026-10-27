@@ -7,37 +7,8 @@
   let profileId = $derived(tabs.profile()?.id ?? null);
   let tabId = $derived(tabs.activeId());
   let actions = $derived(extensions.activeActions(profileId, tabId));
-  let failure = $derived(extensions.failureReason(profileId, tabId));
   let shortcut = $derived(extensions.actionShortcut(profileId, tabId));
   let actionRoot = $state<HTMLDivElement>();
-
-  const failureMessage = (reason: ReturnType<typeof extensions.failureReason>) => {
-    switch (reason) {
-      case "tab_discarded":
-        return "This tab is sleeping. Activate it before opening the extension.";
-      case "action_disabled":
-        return "This extension action is disabled on the current page.";
-      case "popup_capacity_exceeded":
-      case "capacity_exceeded":
-        return "Close the current extension popup and try again.";
-      case "unsupported_platform":
-        return "This extension action is not supported on this platform.";
-      case "shutting_down":
-        return "Extensions are unavailable while Zephium is closing.";
-      case "runtime_superseded":
-      case "runtime_unavailable":
-      case "tab_unavailable":
-      case "action_unavailable":
-        return "The extension changed. Try the action again.";
-      case "popup_unavailable":
-        return "This extension popup is unavailable.";
-      case "invalid_request":
-      case "native_admission_failed":
-        return "Zephium couldn't open this extension action.";
-      case null:
-        return "";
-    }
-  };
 
   // The menu holding the tiles closes when one is chosen, so a popup hangs
   // from the menu's own button, which stays, rather than from a vanished tile.
@@ -73,21 +44,21 @@
 </script>
 
 <!--
-  The extensions' own buttons, a grid of tiles in the tray named by their
-  tooltips. They are items of the menu around them, so choosing one closes it
-  and arrow keys travel over them. At rail width they are rows of the
-  column's native menu instead.
+  The extensions' own buttons, tiles in the tray's extensions row named by
+  their tooltips. Choosing one closes the panel around them. At rail width
+  they are rows of the column's native menu instead.
 -->
 <div
   bind:this={actionRoot}
   class="actions"
+  role="group"
   aria-label={m.webext_page_title()}
   data-zephium-extension-actions
 >
   {#each actions as action (action.runtime.install_id)}
     <button
       type="button"
-      role="menuitem"
+      data-dismiss
       aria-label={action.label || m.webext_action()}
       aria-haspopup={action.presents_popup ? "dialog" : undefined}
       title={action.label || m.webext_action()}
@@ -108,17 +79,16 @@
   {/each}
 </div>
 
-{#if failure !== null}
-  <p role="status" aria-live="polite" class="failure">
-    {failureMessage(failure)}
-  </p>
-{/if}
-
 <style>
+  /* Right of the row's name, wrapping onto more lines when there are more
+     than fit. */
   .actions {
-    display: grid;
-    grid-template-columns: repeat(5, 36px);
-    gap: 4px;
+    display: flex;
+    flex: 1 1 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 2px;
+    min-inline-size: 0;
   }
 
   .actions:empty {
@@ -128,11 +98,11 @@
   .actions .tile {
     display: grid;
     place-items: center;
-    width: 36px;
-    height: 36px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     border: 0;
-    border-radius: var(--radius-control-compact);
+    border-radius: var(--radius-inset);
     background: none;
     cursor: default;
     outline: none;
@@ -142,6 +112,11 @@
   .actions .tile:hover,
   .actions .tile:focus-visible {
     background: var(--row-hover);
+  }
+
+  .actions .tile:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: -2px;
   }
 
   .actions .tile:active {
@@ -156,13 +131,13 @@
     position: relative;
     display: grid;
     place-items: center;
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
   }
 
   .glyph :global(canvas) {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
   }
 
   .badge {
@@ -186,13 +161,5 @@
 
   .badge[data-unread="true"] {
     background: var(--color-warning);
-  }
-
-  .failure {
-    max-width: 196px;
-    margin: 8px 2px 0;
-    font-size: var(--text-label);
-    line-height: 1.4;
-    color: var(--color-muted);
   }
 </style>

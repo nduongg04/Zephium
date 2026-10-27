@@ -119,11 +119,16 @@ export class HistorySession {
   /** Removes every visit to each address, and the rows showing them. */
   async forget(urls: readonly string[]) {
     if (!urls.length || this.busy) return;
+    this.listing += 1;
+    this.loading = false;
     this.busy = true;
+    const lifetime = this.lifetime;
     const response = await this.call({ kind: "forget", urls: [...urls] });
+    if (lifetime.signal.aborted) return;
     this.busy = false;
     if (response?.kind === "removed") {
       this.visits = this.visits.filter((visit) => !urls.includes(visit.url));
+      await this.reload();
       return;
     }
     this.error = response?.kind === "error" ? response.error : "unavailable";

@@ -133,6 +133,14 @@ impl WebExtensions {
         }
     }
 
+    /// How many are enabled and how many are installed, for a bug report.
+    pub(crate) fn counts(&self) -> (usize, usize) {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        return imp::counts(self);
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        (0, 0)
+    }
+
     /// Restores every profile's extensions at launch.
     pub(crate) fn restore(&self, shell: &Handle) {
         if let Some(data_dir) = self.root.parent() {

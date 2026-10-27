@@ -17,6 +17,7 @@ vi.mock("$shared/ipc/bindings", async () => {
   const { accountFixture } = await import("$shared/testing/account");
   const id = "01J00000000000000000000001";
   return mockBindings({
+    pagePermissionCardHost: async () => {},
     accountGet: async () => ({ account: accountFixture(), fault: null, retry_after: null }),
     profilesGet: async () => ({
       status: "ok" as const,

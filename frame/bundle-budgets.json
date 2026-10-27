@@ -1,79 +1,91 @@
 {
   "browser-panel": {
     "browser": {
-      "js": 446617,
-      "css": 136931
+      "js": 466578,
+      "css": 141782
     },
     "lazy:app/browser/WorkWorkspace.svelte": {
-      "js": 37558,
+      "js": 37784,
       "css": 364
     },
     "lazy:domain/notes/index.ts": {
-      "js": 14703,
+      "js": 14729,
       "css": 0
     },
     "lazy:domain/work-environment/index.ts": {
-      "js": 34143,
+      "js": 34369,
       "css": 0
     },
     "lazy:features/account/components/AccountButton.svelte": {
-      "js": 8715,
+      "js": 8710,
       "css": 7458
     },
     "lazy:features/account/index.ts": {
       "js": 149,
       "css": 0
     },
+    "lazy:features/address/components/PageRequestCard.svelte": {
+      "js": 9306,
+      "css": 2377
+    },
+    "lazy:features/address/components/SiteInfoPanel.svelte": {
+      "js": 20415,
+      "css": 5949
+    },
+    "lazy:features/address/components/ZoomBadge.svelte": {
+      "js": 3315,
+      "css": 851
+    },
     "lazy:features/assist/components/AssistPanel.svelte": {
-      "js": 260039,
-      "css": 46651
+      "js": 261058,
+      "css": 46777
     },
     "lazy:features/assist/components/PageStyles.svelte": {
       "js": 8990,
       "css": 3698
     },
     "lazy:features/blocker/components/ProtectionMenu.svelte": {
-      "js": 10764,
+      "js": 10750,
       "css": 4741
     },
     "lazy:features/bookmarks/components/BookmarksPanel.svelte": {
-      "js": 20250,
+      "js": 20262,
       "css": 6190
     },
     "lazy:features/downloads/components/DownloadsList.svelte": {
-      "js": 12792,
+      "js": 13961,
       "css": 4459
     },
     "lazy:features/history/components/HistoryPage.svelte": {
-      "js": 139330,
+      "js": 139147,
       "css": 10203
     },
     "lazy:features/history/components/HistoryPanel.svelte": {
-      "js": 13609,
-      "css": 3102
+      "js": 15687,
+      "css": 4565
     },
     "lazy:features/library/components/LibraryPage.svelte": {
       "js": 2412,
       "css": 0
     },
     "lazy:features/newtab/components/NewTab.svelte": {
-      "js": 49983,
-      "css": 11741
+      "js": 49244,
+      "css": 12767
     },
     "lazy:features/notes/components/editor/NoteEditor.svelte": {
-      "js": 438979,
+      "js": 438950,
       "css": 11897
     },
     "lazy:features/notes/components/NoteHost.svelte": {
-      "js": 23704,
+      "js": 23730,
       "css": 3598
     },
     "lazy:features/notes/components/Notes.svelte": {
-      "js": 134074,
+      "js": 134063,
       "css": 14584
     },
     "lazy:features/notes/components/NotesPage.svelte": {
-      "js": 156957,
+      "js": 156969,
       "css": 20535
     },
     "lazy:features/notes/index.ts": {
@@ -81,55 +93,59 @@
       "css": 0
     },
     "lazy:features/search/components/LauncherPanel.svelte": {
-      "js": 101428,
+      "js": 106004,
       "css": 10642
     },
     "lazy:features/search/components/NewTabSearch.svelte": {
-      "js": 93954,
-      "css": 8254
+      "js": 99437,
+      "css": 8495
     },
     "lazy:features/settings/components/account/AccountAvatarCrop.svelte": {
-      "js": 9428,
+      "js": 9470,
       "css": 5508
     },
     "lazy:features/settings/components/account/AccountCredits.svelte": {
-      "js": 4533,
+      "js": 4575,
       "css": 3522
     },
     "lazy:features/settings/components/account/AccountEmailFlow.svelte": {
-      "js": 5000,
+      "js": 5001,
       "css": 322
     },
     "lazy:features/settings/components/account/AccountHistory.svelte": {
-      "js": 12356,
+      "js": 12360,
       "css": 2717
     },
     "lazy:features/settings/components/account/AccountPlanChange.svelte": {
-      "js": 11540,
+      "js": 11543,
       "css": 1398
     },
     "lazy:features/settings/components/account/AccountPlans.svelte": {
-      "js": 5479,
+      "js": 5520,
       "css": 2176
     },
+    "lazy:features/settings/components/ClearSiteData.svelte": {
+      "js": 4172,
+      "css": 944
+    },
     "lazy:features/settings/components/sections/AboutPage.svelte": {
-      "js": 18960,
-      "css": 1686
+      "js": 20618,
+      "css": 2383
     },
     "lazy:features/settings/components/sections/AccountPage.svelte": {
-      "js": 69557,
-      "css": 16186
+      "js": 70899,
+      "css": 16435
     },
     "lazy:features/settings/components/sections/AiPage.svelte": {
-      "js": 67775,
+      "js": 67776,
       "css": 5586
     },
     "lazy:features/settings/components/sections/AppearancePage.svelte": {
-      "js": 28776,
-      "css": 16558
+      "js": 32310,
+      "css": 17553
     },
     "lazy:features/settings/components/sections/ConnectionsPage.svelte": {
-      "js": 58175,
+      "js": 58170,
       "css": 8881
     },
     "lazy:features/settings/components/sections/FeaturesPage.svelte": {
@@ -141,11 +157,11 @@
       "css": 52
     },
     "lazy:features/settings/components/sections/GeneralPage.svelte": {
-      "js": 52472,
-      "css": 5098
+      "js": 49719,
+      "css": 7547
     },
     "lazy:features/settings/components/sections/KeyboardPage.svelte": {
-      "js": 19095,
+      "js": 21587,
       "css": 1976
     },
     "lazy:features/settings/components/sections/MemoryPage.svelte": {
@@ -153,19 +169,19 @@
       "css": 3957
     },
     "lazy:features/settings/components/sections/PerformancePage.svelte": {
-      "js": 6524,
+      "js": 6729,
       "css": 1856
     },
     "lazy:features/settings/components/sections/PrivacyPage.svelte": {
-      "js": 33291,
-      "css": 4706
+      "js": 43954,
+      "css": 6593
     },
     "lazy:features/settings/components/sections/ProfilesPage.svelte": {
       "js": 25215,
       "css": 7017
     },
     "lazy:features/settings/components/sections/SearchPage.svelte": {
-      "js": 6704,
+      "js": 6857,
       "css": 1613
     },
     "lazy:features/settings/components/sections/SitesPage.svelte": {
@@ -185,23 +201,27 @@
       "css": 3760
     },
     "lazy:features/settings/components/Settings.svelte": {
-      "js": 136678,
+      "js": 136668,
       "css": 9051
     },
     "lazy:features/settings/components/SettingsIdentity.svelte": {
-      "js": 2317,
+      "js": 2318,
       "css": 611
     },
+    "lazy:features/source/components/SourcePage.svelte": {
+      "js": 3605,
+      "css": 1140
+    },
     "lazy:features/tabs/components/NavigationError.svelte": {
-      "js": 2201,
-      "css": 387
+      "js": 5058,
+      "css": 452
     },
     "lazy:features/tabs/components/SpaceEditor.svelte": {
       "js": 10886,
       "css": 5623
     },
     "lazy:features/tabs/components/SpaceSwitcher.svelte": {
-      "js": 5216,
+      "js": 5217,
       "css": 4029
     },
     "lazy:features/tabs/components/TabCapacityState.svelte": {
@@ -213,31 +233,31 @@
       "css": 5136
     },
     "lazy:features/tasks/components/TaskDetail.svelte": {
-      "js": 18056,
+      "js": 18662,
       "css": 7369
     },
     "lazy:features/tasks/components/Tasks.svelte": {
-      "js": 259147,
+      "js": 263191,
       "css": 26849
     },
     "lazy:features/tasks/components/TasksPage.svelte": {
-      "js": 308148,
+      "js": 314169,
       "css": 36889
     },
     "lazy:features/tasks/lib/capture.ts": {
-      "js": 34101,
+      "js": 34097,
       "css": 0
     },
     "lazy:features/time/components/FocusCover.svelte": {
-      "js": 4849,
+      "js": 4850,
       "css": 2053
     },
     "lazy:features/time/components/TimePage.svelte": {
-      "js": 139816,
+      "js": 140550,
       "css": 20753
     },
     "lazy:features/time/components/TimePanel.svelte": {
-      "js": 131821,
+      "js": 131814,
       "css": 18841
     },
     "lazy:features/tools/components/previews/BookmarksView.svelte": {
@@ -253,23 +273,23 @@
       "css": 3248
     },
     "lazy:features/tools/components/previews/HistoryView.svelte": {
-      "js": 110687,
+      "js": 110676,
       "css": 7301
     },
     "lazy:features/tools/components/previews/NotesView.svelte": {
-      "js": 134629,
+      "js": 134644,
       "css": 8913
     },
     "lazy:features/tools/components/previews/TasksView.svelte": {
-      "js": 136920,
+      "js": 136907,
       "css": 8675
     },
     "lazy:features/tools/components/previews/TimeView.svelte": {
-      "js": 110947,
+      "js": 110931,
       "css": 7301
     },
     "lazy:features/tools/components/ToolSlot.svelte": {
-      "js": 7736,
+      "js": 7737,
       "css": 369
     },
     "lazy:features/updates/components/UpdateCards.svelte": {
@@ -281,15 +301,15 @@
       "css": 1816
     },
     "lazy:features/webext/components/WebExtensionManager.svelte": {
-      "js": 129167,
+      "js": 129156,
       "css": 13049
     },
     "lazy:features/work/components/AgentLine.svelte": {
-      "js": 66417,
+      "js": 66633,
       "css": 26429
     },
     "lazy:features/work/components/bar/ModelPicker.svelte": {
-      "js": 171673,
+      "js": 171121,
       "css": 34149
     },
     "lazy:features/work/components/bar/VoiceView.svelte": {
@@ -305,11 +325,11 @@
       "css": 838
     },
     "lazy:features/work/components/objects/Code.svelte": {
-      "js": 15766,
+      "js": 15769,
       "css": 3697
     },
     "lazy:features/work/components/objects/Diagram.svelte": {
-      "js": 47273,
+      "js": 46730,
       "css": 4941
     },
     "lazy:features/work/components/objects/Diff.svelte": {
@@ -325,7 +345,7 @@
       "css": 5127
     },
     "lazy:features/work/components/objects/File.svelte": {
-      "js": 17711,
+      "js": 17714,
       "css": 4705
     },
     "lazy:features/work/components/objects/Folder.svelte": {
@@ -353,7 +373,7 @@
       "css": 2538
     },
     "lazy:features/work/components/objects/Picks.svelte": {
-      "js": 45275,
+      "js": 45280,
       "css": 22782
     },
     "lazy:features/work/components/objects/Plan.svelte": {
@@ -369,7 +389,7 @@
       "css": 5472
     },
     "lazy:features/work/components/objects/Sheet.svelte": {
-      "js": 20863,
+      "js": 20868,
       "css": 8733
     },
     "lazy:features/work/components/objects/Subject.svelte": {
@@ -393,15 +413,15 @@
       "css": 1659
     },
     "lazy:features/work/components/start/WorkStart.svelte": {
-      "js": 33172,
+      "js": 33171,
       "css": 6727
     },
     "lazy:features/work/components/WorkCanvas.svelte": {
-      "js": 442976,
+      "js": 442487,
       "css": 123415
     },
     "lazy:features/work/components/WorkEnvironmentWorkspace.svelte": {
-      "js": 568343,
+      "js": 568575,
       "css": 52610
     },
     "lazy:features/work/components/WorkFileInspector.svelte": {
@@ -409,7 +429,7 @@
       "css": 1135
     },
     "lazy:features/work/components/WorkResultInspector.svelte": {
-      "js": 62648,
+      "js": 62671,
       "css": 29168
     },
     "lazy:features/work/components/WorkSubjectInspector.svelte": {
@@ -417,30 +437,30 @@
       "css": 4388
     },
     "lazy:features/work/lib/diagram-worker.ts": {
-      "js": 15967,
+      "js": 15881,
       "css": 0
     },
     "lazy:shared/ui/data/Artifact/WorkChart.svelte": {
-      "js": 45440,
+      "js": 45451,
       "css": 10496
     },
     "lazy:shared/ui/data/Chart/Chart.svelte": {
-      "js": 44513,
+      "js": 44524,
       "css": 10496
     },
     "lazy:shared/ui/data/Code/CodeBlock.svelte": {
-      "js": 13266,
+      "js": 13269,
       "css": 2750
     },
     "panel": {
-      "js": 129645,
-      "css": 48616
+      "js": 130739,
+      "css": 50664
     }
   },
   "onboarding": {
     "onboarding": {
-      "js": 222932,
-      "css": 120319
+      "js": 227777,
+      "css": 122559
     }
   }
 }

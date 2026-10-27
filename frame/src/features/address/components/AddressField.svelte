@@ -17,19 +17,26 @@
   import Icon from "$shared/ui/Icon";
   import Button from "$shared/ui/Button";
   import IconButton from "$shared/ui/IconButton";
-  import PageRequestCard from "./PageRequestCard.svelte";
+  import CaptureControl from "$shared/ui/CaptureControl";
+  import { preferences } from "$domain/preferences";
   import * as find from "../lib/find.svelte";
   import { flushSync, untrack, type Snippet } from "svelte";
   import { duration, easing, reducedMotion } from "$shared/lib/motion";
-  import { addressSecurity, editingAddress, restingAddress } from "../lib/address-model";
+  import {
+    addressSecurity,
+    editingAddress,
+    restingAddress,
+    type SitePage,
+  } from "../lib/address-model";
 
   let {
     compact = false,
     trailing,
   }: {
     compact?: boolean;
-    /** Controls that act on the page, at the far end of the field. */
-    trailing?: Snippet;
+    /** Controls that act on the page, at the far end of the field. Told which
+     *  page it is, or null where there is no site to describe. */
+    trailing?: Snippet<[SitePage | null]>;
   } = $props();
 
   let input: HTMLInputElement;
@@ -60,6 +67,9 @@
   let draft = $state("");
   let activeUrl = $derived(tabs.activeTab()?.url ?? "");
   let activeContent = $derived(tabs.activeTab()?.content ?? "web");
+  // The page in front using the camera or microphone says so where its
+  // address is, as well as on its tab.
+  let activeCapture = $derived(tabs.activeTab()?.capture ?? null);
   // Only a store page actually in front, never one behind Settings or another
   // browser page, offers to install.
   let listedId = $derived(
@@ -78,13 +88,33 @@
       ? "Extension page — enter an address to open a new tab"
       : m.ui_enter_an_address(),
   );
+  let zoom = $derived(tabs.activeTab()?.zoom ?? null);
+  let standardZoom = $derived(Number(preferences.value("zoom.default")));
   let authoritativeValue = $derived(restingAddress(activeUrl));
   let value = $derived(editing ? draft : authoritativeValue);
-  let security = $derived(addressSecurity(activeUrl));
-  // Only a problem earns a glyph. A padlock on every encrypted page is the
-  // default state of the web and says nothing; the field reads cleaner
-  // without it, and the one case worth interrupting for still shows.
-  let warning = $derived(!editing && security === "insecure");
+  let security = $derived(
+    addressSecurity(activeUrl, tabs.activeTab()?.certificate_exception === true),
+  );
+  // A web page in front has a site to describe. A new tab, an internal page
+  // and a page behind Settings have none.
+  let sitePage = $derived<SitePage | null>(
+    activeContent === "web" && security !== "none" && surface.currentPage() === null
+      ? {
+          url: activeUrl,
+          security,
+          warning:
+            security === "untrusted"
+              ? m.address_certificate_exception()
+              : security === "insecure"
+                ? m.address_insecure()
+                : null,
+          capture: activeCapture,
+          privateWindow: tabs.profile()?.kind === "incognito",
+          zoom,
+          standardZoom,
+        }
+      : null,
+  );
 
   $effect(() => {
     const command = ui.uiCommand();
@@ -207,6 +237,17 @@
   });
 
   let pageRequest = $derived(tabs.activeTab()?.page_request ?? null);
+
+  // What appears only on demand is fetched the first time it is wanted, not
+  // at startup; a failed fetch is tried again at the next request.
+  let RequestCard = $state.raw<typeof import("./PageRequestCard.svelte").default | null>(null);
+  $effect(() => {
+    if (pageRequest && RequestCard === null)
+      void import("./PageRequestCard.svelte").then(
+        (module) => (RequestCard = module.default),
+        () => {},
+      );
+  });
 </script>
 
 <!--
@@ -229,23 +270,23 @@
     class:shadow-[inset_0_0_0_1px_var(--color-danger)]={failed}
     class="address-field h-[34px] items-center gap-2 rounded-row bg-address ps-2.5 pe-1 shadow-[var(--shadow-tile)] transition-[background-color,box-shadow] duration-[var(--motion-fast)] ease-[var(--ease-out)] [--address-centering:20px] focus-within:bg-address-hover focus-within:shadow-[var(--shadow-field-focus)] hover:bg-address-hover"
   >
-    {#if !compact && warning}
-      <span
-        class="flex h-4 w-4 shrink-0 items-center justify-center text-danger"
-        title={m.address_insecure()}
-        role="img"
-        aria-label={m.address_insecure()}
-      >
-        <Icon icon={Alert02Icon} size={14} />
-      </span>
+    {#if !compact && activeCapture && !editing}
+      <CaptureControl
+        site={activeUrl}
+        capture={activeCapture}
+        onOpen={(x, y) => {
+          const id = tabs.activeId();
+          if (id !== null) tabs.openMediaMenu(id, x, y);
+        }}
+      />
     {/if}
 
     <!--
       Resting, the text centres on the field rather than on the input. The
       trailing tray takes 26px and the field's own gutters differ by 6px, so
       the input's centre sits 10px left of the field's; padding twice that on
-      the leading edge puts it back. Editing drops it and returns to the
-      start, where a long URL has to begin.
+      the leading edge puts it back. Editing drops the padding and returns to
+      the start, where a long URL has to begin.
     -->
     <span class="address-clip">
       <!-- Stays mounted and correct while find borrows the field: native
@@ -337,7 +378,9 @@
         buttonSize={24}
         onclick={() => find.hide()}
       />
-    {:else if !compact && trailing}{@render trailing()}{/if}
+    {:else if !compact}
+      {#if trailing}{@render trailing(sitePage)}{/if}
+    {/if}
   </div>
   {#if !compact && listedInstalled}
     {#if removing}
@@ -395,9 +438,9 @@
     <p class="popup-notice" role="status" title={m.page_request_waiting()}>
       <Icon icon={Alert02Icon} size={14} />
     </p>
-  {:else if pageRequest}
+  {:else if pageRequest && RequestCard}
     {#key `${tabs.activeId()}:${JSON.stringify(pageRequest)}`}
-      <PageRequestCard tab={tabs.activeId()!} request={pageRequest} />
+      <RequestCard tab={tabs.activeId()!} request={pageRequest} />
     {/key}
   {/if}
 </form>

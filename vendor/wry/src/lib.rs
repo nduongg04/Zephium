@@ -350,6 +350,8 @@ mod custom_protocol_workaround;
 mod error;
 #[cfg(target_os = "macos")]
 mod file_upload;
+#[cfg(target_os = "macos")]
+mod http_auth;
 #[cfg(any(target_os = "android", test))]
 mod inject_initialization_scripts;
 mod native_admission;
@@ -359,6 +361,14 @@ mod native_cleanup;
 mod permissions;
 #[cfg(target_os = "macos")]
 pub use file_upload::{FileUploadRequest, FileUploadResponder};
+#[cfg(target_os = "macos")]
+pub use http_auth::{HttpAuthChallenge, HttpAuthResponder};
+
+#[cfg(target_os = "macos")]
+pub(crate) struct ServerTrustExceptions {
+  pub(crate) covers: Box<dyn Fn(&str, &str, u16) -> bool>,
+  pub(crate) allows: Box<dyn Fn(&str, &str, u16, &[u8; 32]) -> bool>,
+}
 mod proxy;
 #[cfg(any(target_os = "macos", target_os = "android", target_os = "ios"))]
 mod util;
@@ -901,7 +911,8 @@ struct WebViewAttributes<'a> {
   pub navigation_event_handler: Option<Box<dyn Fn(NavigationEvent)>>,
 
   /// Why a main-frame navigation failed, reported before its `Failed` event.
-  pub navigation_failure_handler: Option<Box<dyn Fn(NavigationId, NavigationFailure)>>,
+  pub navigation_failure_handler:
+    Option<Box<dyn Fn(NavigationId, NavigationFailure, FailedDocument)>>,
 
   /// Hide the native presentation surface synchronously at each main-frame
   /// commit, before delivering its identity event. Hardened embedders can
@@ -962,8 +973,9 @@ struct WebViewAttributes<'a> {
   ///
   /// - **Windows**: Fully supported via WebView2's PermissionRequested event.
   /// - **macOS / iOS**: Camera and microphone via WKUIDelegate's public media
-  ///   capture callback (macOS 12+ / iOS 15+). This is not a deny-all capability
-  ///   boundary: display capture, geolocation and WebAuthn are not routed here.
+  ///   capture callback (macOS 12+ / iOS 15+), and on macOS geolocation. This
+  ///   is not a deny-all capability boundary: display capture and WebAuthn are
+  ///   not routed here.
   /// - **Linux**: Fully supported via WebKitGTK's permission-request signal.
   /// - **Android**: Supported via JNI bridge for geolocation, microphone, camera,
   ///   protected media, and MIDI requests. Android runtime permissions may still
@@ -1566,8 +1578,9 @@ impl<'a> WebViewBuilder<'a> {
   ///
   /// - **Windows**: Fully supported via WebView2's PermissionRequested event.
   /// - **macOS / iOS**: Camera and microphone via WKUIDelegate's public media
-  ///   capture callback (macOS 12+ / iOS 15+). This is not a deny-all capability
-  ///   boundary: display capture, geolocation and WebAuthn are not routed here.
+  ///   capture callback (macOS 12+ / iOS 15+), and on macOS geolocation. This
+  ///   is not a deny-all capability boundary: display capture and WebAuthn are
+  ///   not routed here.
   /// - **Linux**: Fully supported via WebKitGTK's permission-request signal.
   /// - **Android**: Supported via JNI bridge for geolocation, microphone, camera,
   ///   protected media, and MIDI requests. Android runtime permissions may still
@@ -1756,10 +1769,11 @@ impl<'a> WebViewBuilder<'a> {
   /// native error text.
   ///
   /// Supported on macOS and Windows. On Windows, WebView2's own error page
-  /// is hidden and never reported as a commit. Other platforms ignore it.
+  /// is hidden and never reported as a commit; [`FailedDocument`] says when
+  /// it took the place of the shown document. Other platforms ignore it.
   pub fn with_navigation_failure_handler(
     mut self,
-    handler: impl Fn(NavigationId, NavigationFailure) + 'static,
+    handler: impl Fn(NavigationId, NavigationFailure, FailedDocument) + 'static,
   ) -> Self {
     self.attrs.navigation_failure_handler = Some(Box::new(handler));
     self
@@ -1928,7 +1942,15 @@ pub(crate) struct PlatformSpecificWebViewAttributes {
   #[cfg(target_os = "macos")]
   file_upload_handler: Option<Box<file_upload::FileUploadHandler>>,
   #[cfg(target_os = "macos")]
+  http_auth_handler: Option<Box<http_auth::HttpAuthHandler>>,
+  #[cfg(target_os = "macos")]
+  certificate_failure_handler: Option<Box<dyn Fn(CertificateFailure)>>,
+  #[cfg(target_os = "macos")]
+  server_trust_exceptions: Option<ServerTrustExceptions>,
+  #[cfg(target_os = "macos")]
   native_download_handler: Option<Box<dyn Fn(&objc2_web_kit::WKDownload)>>,
+  #[cfg(target_os = "macos")]
+  autofill_button_handler: Option<Box<dyn Fn()>>,
   #[cfg(target_os = "macos")]
   context_menu_handler: Option<
     Box<
@@ -1960,7 +1982,15 @@ impl Default for PlatformSpecificWebViewAttributes {
       #[cfg(target_os = "macos")]
       file_upload_handler: None,
       #[cfg(target_os = "macos")]
+      http_auth_handler: None,
+      #[cfg(target_os = "macos")]
+      certificate_failure_handler: None,
+      #[cfg(target_os = "macos")]
+      server_trust_exceptions: None,
+      #[cfg(target_os = "macos")]
       native_download_handler: None,
+      #[cfg(target_os = "macos")]
+      autofill_button_handler: None,
       #[cfg(target_os = "macos")]
       context_menu_handler: None,
     }
@@ -2051,6 +2081,33 @@ pub trait WebViewBuilderExtMacos {
     self,
     handler: impl Fn(&objc2_web_kit::WKWebView, FileUploadRequest, FileUploadResponder) + 'static,
   ) -> Self;
+  /// Hands HTTP Basic, Digest, NTLM and Negotiate challenges to the embedder
+  /// instead of cancelling them. The responder cancels on drop; the embedder
+  /// must cancel retained responders on navigation and teardown. Without it
+  /// every such challenge is cancelled. Client certificates are always
+  /// cancelled and server trust is unaffected.
+  fn with_http_auth_handler(
+    self,
+    handler: impl Fn(HttpAuthChallenge, HttpAuthResponder) + 'static,
+  ) -> Self;
+  /// Reports a main-frame load refused for its server certificate, with the
+  /// presented leaf's digest, before its navigation failure is reported.
+  /// Classification evaluates a copy of the chain without network access.
+  fn with_certificate_failure_handler(self, handler: impl Fn(CertificateFailure) + 'static)
+    -> Self;
+  /// Lets a server-trust challenge that fails system evaluation proceed
+  /// when `allows` accepts its exact `(scheme, host, port, leaf SHA-256)`.
+  /// `covers` is asked first so ordinary connections never read their chain.
+  /// Without this every challenge keeps the system's default handling.
+  fn with_server_trust_exceptions(
+    self,
+    covers: impl Fn(&str, &str, u16) -> bool + 'static,
+    allows: impl Fn(&str, &str, u16, &[u8; 32]) -> bool + 'static,
+  ) -> Self;
+  /// Called when the person clicks the AutoFill button WebKit draws inside a
+  /// field. Only a script in a content world allowed to drive AutoFill can
+  /// show that button; page script cannot.
+  fn with_autofill_button_handler(self, handler: impl Fn() + 'static) -> Self;
   /// Merges browser-owned items into the native page context menu without
   /// serializing page metadata through Rust. The callback receives WebKit's
   /// already-created default menu and may replace or suppress it.
@@ -2099,6 +2156,39 @@ impl WebViewBuilderExtMacos for WebViewBuilder<'_> {
     handler: impl Fn(&objc2_web_kit::WKWebView, FileUploadRequest, FileUploadResponder) + 'static,
   ) -> Self {
     self.platform_specific.file_upload_handler = Some(Box::new(handler));
+    self
+  }
+
+  fn with_http_auth_handler(
+    mut self,
+    handler: impl Fn(HttpAuthChallenge, HttpAuthResponder) + 'static,
+  ) -> Self {
+    self.platform_specific.http_auth_handler = Some(Box::new(handler));
+    self
+  }
+
+  fn with_certificate_failure_handler(
+    mut self,
+    handler: impl Fn(CertificateFailure) + 'static,
+  ) -> Self {
+    self.platform_specific.certificate_failure_handler = Some(Box::new(handler));
+    self
+  }
+
+  fn with_server_trust_exceptions(
+    mut self,
+    covers: impl Fn(&str, &str, u16) -> bool + 'static,
+    allows: impl Fn(&str, &str, u16, &[u8; 32]) -> bool + 'static,
+  ) -> Self {
+    self.platform_specific.server_trust_exceptions = Some(ServerTrustExceptions {
+      covers: Box::new(covers),
+      allows: Box::new(allows),
+    });
+    self
+  }
+
+  fn with_autofill_button_handler(mut self, handler: impl Fn() + 'static) -> Self {
+    self.platform_specific.autofill_button_handler = Some(Box::new(handler));
     self
   }
 
@@ -2203,6 +2293,7 @@ pub(crate) struct PlatformSpecificWebViewAttributes {
   native_download_handler: Option<
     std::sync::Arc<dyn Fn(&ICoreWebView2Controller, &ICoreWebView2DownloadStartingEventArgs)>,
   >,
+  permission_decisions_saved: bool,
 }
 
 #[cfg(windows)]
@@ -2223,6 +2314,7 @@ impl Default for PlatformSpecificWebViewAttributes {
       profile_name: None,
       native_context_menu_handler: None,
       native_download_handler: None,
+      permission_decisions_saved: false,
     }
   }
 }
@@ -2272,6 +2364,11 @@ pub trait WebViewBuilderExtWindows {
   ///
   /// <https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/winrt/microsoft_web_webview2_core/corewebview2settings#aredefaultcontextmenusenabled>
   fn with_default_context_menus(self, enabled: bool) -> Self;
+
+  /// Lets WebView2 save the person's answer to its own permission prompt in
+  /// the profile, as a browser does. Off by default: every request then asks
+  /// again, and nothing the permission handler itself answers is ever saved.
+  fn with_permission_decisions_saved(self, saved: bool) -> Self;
 
   /// Specifies the theme of webview2. This affects things like `prefers-color-scheme`.
   ///
@@ -2416,6 +2513,11 @@ impl WebViewBuilderExtWindows for WebViewBuilder<'_> {
 
   fn with_default_context_menus(mut self, enabled: bool) -> Self {
     self.platform_specific.default_context_menus = enabled;
+    self
+  }
+
+  fn with_permission_decisions_saved(mut self, saved: bool) -> Self {
+    self.platform_specific.permission_decisions_saved = saved;
     self
   }
 
@@ -2910,6 +3012,11 @@ pub trait WebViewExtWindows {
   /// see <https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10121039>
   fn set_theme(&self, theme: Theme) -> Result<()>;
 
+  /// Shows WebView2's own Save As dialog for the loaded document. Refused
+  /// unless the view was built with a native context menu handler, which only
+  /// a page a person reads has.
+  fn show_save_as(&self) -> Result<()>;
+
   /// Sets the [memory usage target level][1].
   ///
   /// When to best use this mode depends on the app in question. Most commonly it's called when
@@ -2952,6 +3059,10 @@ impl WebViewExtWindows for WebView {
 
   fn set_theme(&self, theme: Theme) -> Result<()> {
     self.webview.set_theme(theme)
+  }
+
+  fn show_save_as(&self) -> Result<()> {
+    self.webview.show_save_as()
   }
 
   fn set_memory_usage_level(&self, level: MemoryUsageLevel) -> Result<()> {
@@ -3317,8 +3428,46 @@ pub enum NavigationFailure {
   TimedOut,
   /// A secure connection could not be established or verified.
   Insecure,
+  /// The server's certificate was refused, and what the engine could tell
+  /// about why.
+  Certificate(CertificateProblem),
   /// Any other failure.
   Other,
+}
+
+/// What a failed main-frame navigation left in the view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FailedDocument {
+  /// The document shown before the navigation is still there.
+  Kept,
+  /// Windows: WebView2 committed its error document in place of the shown
+  /// one (blank when its built-in error page is off). `url` is the address
+  /// the navigation was for, from Wry's own in-flight navigation record.
+  Replaced { url: String },
+}
+
+/// Why a server certificate was refused, as a category; never native text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CertificateProblem {
+  /// Expired, or not valid yet.
+  Expired,
+  /// Self-signed, or from an issuer the system does not trust.
+  Untrusted,
+  /// Issued for a different name.
+  NameMismatch,
+  Revoked,
+  Other,
+}
+
+/// A main-frame load whose server certificate was refused.
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CertificateFailure {
+  /// The address that failed, bounded.
+  pub url: String,
+  pub problem: CertificateProblem,
+  /// SHA-256 of the presented leaf certificate's DER encoding.
+  pub leaf_sha256: Option<[u8; 32]>,
 }
 
 /// Identity-bearing observation of a main-frame navigation.

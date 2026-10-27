@@ -9,6 +9,9 @@ use zephium_core::bookmarks::{
     MAX_BOOKMARKS, MAX_DEPTH, MAX_LISTING, MAX_QUERY_BYTES, MAX_SEARCH_RESULTS,
 };
 
+/// Words of a search that count; the rest are ignored.
+const MAX_QUERY_WORDS: usize = 8;
+
 const NODE_COLUMNS: &str = "b.id, b.parent_id, b.url, b.title,
      (SELECT count(*) FROM bookmarks c WHERE c.parent_id = b.id)";
 
@@ -95,21 +98,43 @@ fn apply(conn: &mut Connection, request: BookmarkRequest) -> Outcome<BookmarkRep
             if query.is_empty() || query.len() > MAX_QUERY_BYTES {
                 return Ok(Err(Refused(BookmarkFailure::Invalid)));
             }
-            let pattern = format!(
-                "%{}%",
-                query
-                    .replace('\\', "\\\\")
-                    .replace('%', "\\%")
-                    .replace('_', "\\_")
-            );
+            // Every word must appear in the title or the address, in any
+            // order, as the launcher scores a match.
+            let patterns: Vec<String> = query
+                .split_whitespace()
+                .take(MAX_QUERY_WORDS)
+                .map(|word| {
+                    format!(
+                        "%{}%",
+                        word.replace('\\', "\\\\")
+                            .replace('%', "\\%")
+                            .replace('_', "\\_")
+                    )
+                })
+                .collect();
+            let matches = (1..=patterns.len())
+                .map(|at| {
+                    format!(" AND (b.title LIKE ?{at} ESCAPE '\\' OR b.url LIKE ?{at} ESCAPE '\\')")
+                })
+                .collect::<String>();
+            let limit = MAX_SEARCH_RESULTS;
             let mut rows = conn.prepare_cached(&format!(
                 "SELECT {NODE_COLUMNS} FROM bookmarks b
-                 WHERE b.url IS NOT NULL
-                   AND (b.title LIKE ?1 ESCAPE '\\' OR b.url LIKE ?1 ESCAPE '\\')
-                 ORDER BY b.added_at DESC, b.id DESC LIMIT ?2"
+                 WHERE b.url IS NOT NULL{matches}
+                 ORDER BY b.added_at DESC, b.id DESC LIMIT {limit}"
             ))?;
             let nodes = rows
-                .query_map(params![pattern, MAX_SEARCH_RESULTS], node)?
+                .query_map(rusqlite::params_from_iter(&patterns), node)?
+                .collect::<rusqlite::Result<_>>()?;
+            Ok(Ok(BookmarkReply::Nodes(nodes)))
+        }
+        BookmarkRequest::All => {
+            let mut rows = conn.prepare_cached(
+                "SELECT b.id, b.parent_id, b.url, b.title, 0 FROM bookmarks b
+                 ORDER BY b.parent_id, b.position, b.id LIMIT ?1",
+            )?;
+            let nodes = rows
+                .query_map(params![MAX_BOOKMARKS], node)?
                 .collect::<rusqlite::Result<_>>()?;
             Ok(Ok(BookmarkReply::Nodes(nodes)))
         }
@@ -911,6 +936,63 @@ mod tests {
         assert_eq!(
             titles(hub.bookmarks(profile, BookmarkRequest::Search { query: "%".into() })),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_search_matches_each_word_in_the_title_or_the_address() {
+        let (mut hub, profile) = hub();
+        added(hub.bookmarks(profile, link(None, "Guide to Rust", "https://doc.example/")));
+        added(hub.bookmarks(profile, link(None, "Rust", "https://example.com/guide")));
+        added(hub.bookmarks(profile, link(None, "Rust", "https://example.com/other")));
+        let found = |hub: &mut Hub, query: &str| {
+            let mut found = titles(hub.bookmarks(
+                profile,
+                BookmarkRequest::Search {
+                    query: query.into(),
+                },
+            ));
+            found.sort();
+            found
+        };
+        assert_eq!(found(&mut hub, "rust guide"), vec!["Guide to Rust", "Rust"]);
+        assert_eq!(
+            found(&mut hub, "  GUIDE   rust "),
+            vec!["Guide to Rust", "Rust"]
+        );
+        assert!(found(&mut hub, "rust missing").is_empty());
+        assert!(found(&mut hub, "rust %").is_empty());
+    }
+
+    #[test]
+    fn all_lists_every_node_with_siblings_in_their_order() {
+        let (mut hub, profile) = hub();
+        let folder = added(hub.bookmarks(
+            profile,
+            BookmarkRequest::AddFolder {
+                parent: None,
+                title: "Folder".into(),
+            },
+        ));
+        added(hub.bookmarks(profile, link(Some(folder), "Inside", "https://in.example/")));
+        added(hub.bookmarks(profile, link(None, "Top", "https://top.example/")));
+        added(hub.bookmarks(
+            profile,
+            link(Some(folder), "Second", "https://two.example/"),
+        ));
+        let BookmarkReply::Nodes(all) = hub.bookmarks(profile, BookmarkRequest::All) else {
+            panic!("all");
+        };
+        assert_eq!(
+            all.iter()
+                .map(|node| (node.parent, node.title.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (None, "Folder"),
+                (None, "Top"),
+                (Some(folder), "Inside"),
+                (Some(folder), "Second"),
+            ]
         );
     }
 }

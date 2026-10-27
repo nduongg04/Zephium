@@ -90,7 +90,7 @@ impl State {
 pub struct Overlay {
     window: WebviewWindow,
     state: Arc<Mutex<State>>,
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     recovery_document: Option<tauri::Url>,
 }
 impl Overlay {
@@ -114,7 +114,7 @@ impl Overlay {
         }
         let this = Self {
             window,
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             recovery_document: pending_document.clone(),
             state: Arc::new(Mutex::new(State {
                 model,
@@ -193,7 +193,7 @@ impl Overlay {
         self.on_main(|this| this.present());
         self.snapshot()
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub(crate) fn prepare_recovery(&self) -> Option<tauri::Url> {
         let document = self.recovery_document.clone()?;
         {

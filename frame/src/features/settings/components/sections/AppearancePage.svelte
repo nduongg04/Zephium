@@ -1,5 +1,6 @@
 <script lang="ts">
   import PreferenceSelect from "../PreferenceSelect.svelte";
+  import ZoomLevels from "../ZoomLevels.svelte";
   import ModePicker from "../appearance/ModePicker.svelte";
   import ThemeGallery from "../appearance/ThemeGallery.svelte";
   import ThemeColors from "../appearance/ThemeColors.svelte";
@@ -203,6 +204,11 @@
       onchange={(v) => void preferences.set("ui.code-font", v)}
     />
   </SettingsRow>
+</SettingsGroup>
+
+<SettingsGroup title={m.settings_zoom()}>
+  <PreferenceSelect id="appearance.zoom" preference="zoom.default" />
+  <ZoomLevels />
 </SettingsGroup>
 
 <SettingsGroup title={m.look_advanced()}>

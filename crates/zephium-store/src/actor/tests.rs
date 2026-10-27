@@ -1,6 +1,7 @@
 use super::*;
 mod activity_writes;
 mod chats;
+mod zoom;
 use rusqlite::{params, Connection};
 use zephium_core::blocker::{BlockerConfig, BlockerConfigRevision, ProfileBlockerConfig};
 use zephium_core::ids::{ItemId, PagePermissionGrantId, SpaceId, UserscriptId};
@@ -1042,6 +1043,7 @@ fn recently_closed_tabs_roundtrip_in_the_authoritative_bounded_snapshot() {
         zoom: 1.25,
         session_id: Some(zephium_core::ids::ClosedSessionId::from(42)),
         closed_at_ms: Some(1_700_000_000_123),
+        position: None,
     });
     store.save_session(session.clone());
     assert_eq!(loaded(&store), session);
@@ -1713,16 +1715,161 @@ fn favicons_roundtrip_with_age() {
     assert_eq!(raster, bytes);
     assert!(age < 5);
 
-    hub.save_favicon(profile, "https://example.com/path", None, &rgba());
+    for refused in [
+        "https://example.com:443",
+        "https://example.com/path?q=1",
+        "https://example.com/path#top",
+        "ftp://example.com",
+    ] {
+        hub.save_favicon(profile, refused, None, &rgba());
+        assert!(hub.favicon_bytes(profile, refused).is_none(), "{refused}");
+    }
     hub.save_favicon(profile, "https://invalid.example", None, &[1, 2, 3]);
-    assert_eq!(hub.favicon_bytes(profile, "https://example.com/path"), None);
-    assert_eq!(hub.favicon_bytes(profile, "https://invalid.example"), None);
+    assert!(hub
+        .favicon_bytes(profile, "https://invalid.example")
+        .is_none());
 
     assert_eq!(hub.favicon_bytes(ProfileId::from(99), origin), None);
     assert_eq!(
         hub.favicon_raster_with_age(ProfileId::from(99), origin),
         None
     );
+}
+
+#[test]
+fn a_page_keeps_its_own_icon_beside_the_origin_row() {
+    let mut hub = Hub::in_memory().unwrap();
+    hub.save(&sample()).unwrap();
+    let profile = ProfileId::from(1);
+    let origin = "https://example.com";
+    let page = "https://example.com/sheets/d/1";
+    let (site, sheet) = (rgba(), vec![9; zephium_core::icon::RGBA32_BYTES]);
+
+    hub.save_favicon(profile, origin, None, &site);
+    assert!(hub.favicon_bytes(profile, page).is_none());
+    hub.save_favicon(profile, page, None, &sheet);
+    assert_eq!(hub.favicon_bytes(profile, page).unwrap().1, sheet);
+    assert_eq!(hub.favicon_bytes(profile, origin).unwrap().1, site);
+    let (raster, age) = hub.favicon_raster_with_age(profile, page).unwrap();
+    assert_eq!(raster, sheet);
+    assert!(age < 5 && hub.favicon_age(profile, page).unwrap() < 5);
+    assert_eq!(
+        (hub.favicon_rows(profile), hub.page_favicon_rows(profile)),
+        (1, 1)
+    );
+
+    hub.save_favicon(profile, page, None, &site);
+    assert_eq!(hub.favicon_bytes(profile, page).unwrap().1, site);
+    assert_eq!(hub.page_favicon_rows(profile), 1);
+
+    hub.forget_page_favicon(profile, page);
+    assert!(hub.favicon_bytes(profile, page).is_none());
+    assert_eq!(hub.favicon_bytes(profile, origin).unwrap().1, site);
+    hub.forget_page_favicon(profile, origin);
+    assert_eq!(hub.favicon_bytes(profile, origin).unwrap().1, site);
+}
+
+#[test]
+fn only_canonical_page_addresses_are_stored_as_page_icons() {
+    let mut hub = Hub::in_memory().unwrap();
+    hub.save(&sample()).unwrap();
+    let profile = ProfileId::from(1);
+    let long = format!("https://example.com/{}", "a".repeat(2048));
+    for refused in [
+        "https://example.com/a?x=1",
+        "https://example.com/a#x",
+        "https://user@example.com/a",
+        "https://EXAMPLE.com/a",
+        "https://example.com:443/a",
+        "file:///a",
+        long.as_str(),
+    ] {
+        hub.save_favicon(profile, refused, None, &rgba());
+        assert!(hub.favicon_bytes(profile, refused).is_none(), "{refused}");
+    }
+    hub.save_favicon(profile, "https://example.com/a", None, &[1, 2, 3]);
+    assert_eq!(hub.page_favicon_rows(profile), 0);
+}
+
+#[test]
+fn page_icons_are_capped_and_the_oldest_go_without_touching_origin_rows() {
+    let mut hub = Hub::in_memory().unwrap();
+    hub.save(&sample()).unwrap();
+    let profile = ProfileId::from(1);
+    hub.save_favicon(profile, "https://kept.example", None, &rgba());
+    for index in 0..520 {
+        hub.save_favicon(
+            profile,
+            &format!("https://example.com/page/{index}"),
+            None,
+            &rgba(),
+        );
+    }
+    assert_eq!(hub.page_favicon_rows(profile), 512);
+    assert_eq!(hub.favicon_rows(profile), 1);
+    assert!(hub
+        .favicon_bytes(profile, "https://example.com/page/0")
+        .is_none());
+    assert!(hub
+        .favicon_bytes(profile, "https://example.com/page/7")
+        .is_none());
+    assert!(hub
+        .favicon_bytes(profile, "https://example.com/page/8")
+        .is_some());
+    assert!(hub
+        .favicon_bytes(profile, "https://example.com/page/519")
+        .is_some());
+}
+
+#[test]
+fn clearing_history_forgets_page_icons_but_not_origin_icons() {
+    let mut hub = Hub::in_memory().unwrap();
+    hub.save(&sample()).unwrap();
+    let profile = ProfileId::from(1);
+    let seed = |hub: &mut Hub| {
+        hub.save_favicon(profile, "https://example.com", None, &rgba());
+        hub.save_favicon(profile, "https://example.com/old", None, &rgba());
+        hub.backdate_page_favicons(profile, 7 * 24 * 3600);
+        hub.save_favicon(profile, "https://example.com/recent", None, &rgba());
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    seed(&mut hub);
+    hub.clear_history(profile, Some(now - 3600));
+    assert!(hub
+        .favicon_bytes(profile, "https://example.com/old")
+        .is_some());
+    assert!(hub
+        .favicon_bytes(profile, "https://example.com/recent")
+        .is_none());
+
+    hub.clear_history(profile, None);
+    assert_eq!(hub.page_favicon_rows(profile), 0);
+    assert!(hub.favicon_bytes(profile, "https://example.com").is_some());
+}
+
+#[test]
+fn forgetting_a_page_from_history_forgets_its_icon_whatever_the_query() {
+    let mut hub = Hub::in_memory().unwrap();
+    hub.save(&sample()).unwrap();
+    let profile = ProfileId::from(1);
+    hub.record_visit(profile, "https://example.com/a?id=1#top", "A");
+    hub.save_favicon(profile, "https://example.com/a", None, &rgba());
+    hub.save_favicon(profile, "https://example.com/b", None, &rgba());
+
+    assert_eq!(
+        hub.forget_history_urls(profile, &["https://example.com/a?id=1#top".to_owned()]),
+        1
+    );
+    assert!(hub
+        .favicon_bytes(profile, "https://example.com/a")
+        .is_none());
+    assert!(hub
+        .favicon_bytes(profile, "https://example.com/b")
+        .is_some());
 }
 
 #[test]
@@ -1799,6 +1946,50 @@ fn favicon_raster_batch_is_single_request_bounded_and_exact() {
             &vec!["https://missing.example".to_owned(); MAX_FAVICON_BATCH_ORIGINS + 1],
         )
         .is_empty());
+}
+
+#[test]
+fn page_icons_travel_the_actor_like_origin_icons() {
+    let mut hub = Hub::in_memory().unwrap();
+    hub.save(&sample()).unwrap();
+    let profile = ProfileId::from(1);
+    let (origin, page) = ("https://example.com", "https://example.com/sheets/");
+    let (site, sheet) = (rgba(), vec![9; zephium_core::icon::RGBA32_BYTES]);
+    let store = SqliteStore::spawn(hub).unwrap();
+
+    store.save_favicon(profile, origin.into(), None, site.clone());
+    store.save_favicon(profile, page.into(), None, sheet.clone());
+    store.save_favicon(
+        profile,
+        "https://example.com/a?q=1".into(),
+        None,
+        sheet.clone(),
+    );
+
+    assert_eq!(
+        store.favicon_rasters(profile, &[origin.to_owned(), page.to_owned()]),
+        vec![
+            (origin.to_owned(), site.clone()),
+            (page.to_owned(), sheet.clone())
+        ]
+    );
+    assert!(store
+        .favicon_rasters(
+            profile,
+            &[origin.to_owned(), "https://example.com/a?q=1".to_owned()]
+        )
+        .is_empty());
+    let (raster, age) = store.favicon_raster_with_age(profile, page).unwrap();
+    assert!(raster == sheet && age < 5);
+    assert!(store
+        .favicon_age(profile, "https://example.com/other")
+        .is_none());
+
+    store.forget_page_favicon(profile, page.into());
+    store.forget_page_favicon(profile, origin.into());
+    assert!(store.flush());
+    assert!(store.favicon_bytes(profile, page).is_none());
+    assert!(store.favicon_bytes(profile, origin).is_some());
 }
 
 #[test]
@@ -3969,6 +4160,57 @@ fn clearing_downloads_forgets_finished_records_and_keeps_live_ones() {
         hub.download_call(profile, DownloadStoreCall::Get(live.id)),
         DownloadStoreReply::Record(Some(_))
     ));
+}
+
+#[test]
+fn clearing_downloads_since_keeps_older_and_live_records() {
+    use zephium_core::downloads::*;
+    use zephium_core::ids::DownloadId;
+    let mut hub = Hub::in_memory().unwrap();
+    hub.save(&sample()).unwrap();
+    let profile = ProfileId::from(1);
+    let session = DownloadId::generate();
+    let record = |created_at, state| DownloadRecord {
+        id: DownloadId::generate(),
+        session,
+        revision: 1,
+        created_at,
+        filename: "fixture.txt".into(),
+        source: "https://example.com".into(),
+        source_is_context: false,
+        state,
+        received: 0,
+        total: None,
+        error: None,
+        destination: None,
+        staging: None,
+        staging_identity: None,
+        identity: None,
+        writer: None,
+        writer_released: false,
+    };
+    let old = record(100, DownloadState::Cancelled);
+    let recent = record(200, DownloadState::Cancelled);
+    let live = record(300, DownloadState::Pending);
+    for value in [&old, &recent, &live] {
+        assert!(matches!(
+            hub.download_call(profile, DownloadStoreCall::Save(Box::new(value.clone()))),
+            DownloadStoreReply::Saved
+        ));
+    }
+    assert!(matches!(
+        hub.download_call(profile, DownloadStoreCall::ClearSince(200)),
+        DownloadStoreReply::Saved
+    ));
+    let held = |hub: &mut Hub, id| {
+        matches!(
+            hub.download_call(profile, DownloadStoreCall::Get(id)),
+            DownloadStoreReply::Record(Some(_))
+        )
+    };
+    assert!(held(&mut hub, old.id));
+    assert!(!held(&mut hub, recent.id));
+    assert!(held(&mut hub, live.id));
 }
 
 #[test]

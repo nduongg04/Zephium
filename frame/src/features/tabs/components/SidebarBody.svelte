@@ -7,7 +7,6 @@
   import type { SidebarEntry } from "../lib/sidebar-model";
   import TabList from "./TabList.svelte";
   import SpaceBar from "./SpaceBar.svelte";
-  import SpaceEmpty from "./SpaceEmpty.svelte";
   import SpacePeek from "./SpacePeek.svelte";
   import { remember } from "../lib/space-memory";
   import { arrive, spaceSwipe, stepSpace } from "../lib/space-swipe";
@@ -28,7 +27,6 @@
   // Private browsing keeps one space, so it has no switcher.
   const spaced = $derived(tabs.profile()?.kind !== "incognito" && tabs.activeSpace() !== undefined);
   const order = $derived(tabs.spaces().map((space) => space.id));
-  const empty = $derived(pinned.length === 0 && today.length === 0);
   let stage = $state<HTMLElement>();
   let sheet = $state<HTMLElement>();
   // The neighbours are drawn only while a swipe has them in view.
@@ -116,8 +114,6 @@
         {splitting}
         {onSelect}
       />
-
-      {#if empty && spaced}<SpaceEmpty space={tabs.activeSpace()!} onopen={tabs.open} />{/if}
     </div>
     {#if peeking && after}<SpacePeek space={after} side="next" />{/if}
   </div>

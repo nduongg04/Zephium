@@ -401,13 +401,24 @@ impl Shell {
                         ..
                     }
                 );
+                // One odd tab must not take every extension's view of the
+                // window down: an unshowable title or address is withheld.
+                let title = if zephium_core::item::page_title_is_sanitized(&tab.title) {
+                    std::borrow::Cow::Borrowed(tab.title.as_str())
+                } else {
+                    std::borrow::Cow::Owned(zephium_core::item::sanitize_page_title(&tab.title))
+                };
+                let url = tab
+                    .url
+                    .as_ref()
+                    .filter(|url| zephium_core::navigation::is_browser_target(url));
                 tabs.push(
                     ExtensionBrowserTab::from_snapshot(
                         previous,
                         id,
                         tab.has_view(),
-                        &tab.title,
-                        tab.url.as_ref(),
+                        &title,
+                        url,
                         tab.loading,
                         pinned,
                     )

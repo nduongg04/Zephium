@@ -46,6 +46,9 @@ pub enum BookmarkRequest {
     Search {
         query: String,
     },
+    /// Every folder and link with siblings in order, for an export. Child
+    /// counts are not filled in.
+    All,
     /// `if_absent` returns the existing bookmark for the same address instead
     /// of adding a second one.
     AddLink {

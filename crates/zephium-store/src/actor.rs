@@ -415,10 +415,23 @@ enum Cmd {
     },
     DeleteChat(ProfileId, String, Sender<bool>),
     ClearChats(ProfileId, Option<i64>, Sender<u32>),
+    ZoomLevels(ProfileId, Sender<Vec<zephium_core::zoom::SavedLevel>>),
+    SaveZoomLevel(ProfileId, String, Option<u16>, i64),
+    PopupSites(
+        ProfileId,
+        Sender<Option<Vec<zephium_core::permissions::PageOrigin>>>,
+    ),
+    SetPopupSite(
+        ProfileId,
+        zephium_core::permissions::PageOrigin,
+        bool,
+        Sender<bool>,
+    ),
     AmendVisitTitle(ProfileId, String, String),
     FaviconAge(ProfileId, String, Sender<Option<i64>>),
     FaviconRasterWithAge(ProfileId, String, Sender<Option<(Vec<u8>, i64)>>),
     SaveFavicon(ProfileId, String, Option<String>, Vec<u8>),
+    ForgetPageFavicon(ProfileId, String),
     FaviconBytes(ProfileId, String, Sender<Option<(Option<String>, Vec<u8>)>>),
     FaviconRasters(ProfileId, Vec<String>, Sender<Vec<(String, Vec<u8>)>>),
     PendingProfileDeletions(Sender<ProfileDeletionLoad>),
@@ -1215,7 +1228,7 @@ impl Store for SqliteStore {
     }
 
     fn favicon_age(&self, profile: ProfileId, origin: &str) -> Option<i64> {
-        if !hub::valid_favicon_origin(origin) {
+        if !hub::valid_favicon_key(origin) {
             return None;
         }
         let (tx, rx) = mpsc::channel();
@@ -1240,8 +1253,14 @@ impl Store for SqliteStore {
             .try_send(Cmd::SaveFavicon(profile, origin, Some(content_type), bytes));
     }
 
+    fn forget_page_favicon(&self, profile: ProfileId, page: String) {
+        if hub::valid_favicon_key(&page) {
+            let _ = self.tx.try_send(Cmd::ForgetPageFavicon(profile, page));
+        }
+    }
+
     fn favicon_bytes(&self, profile: ProfileId, origin: &str) -> Option<(Option<String>, Vec<u8>)> {
-        if !hub::valid_favicon_origin(origin) {
+        if !hub::valid_favicon_key(origin) {
             return None;
         }
         let (tx, rx) = mpsc::channel();
@@ -1252,7 +1271,7 @@ impl Store for SqliteStore {
     }
 
     fn favicon_raster_with_age(&self, profile: ProfileId, origin: &str) -> Option<(Vec<u8>, i64)> {
-        if !hub::valid_favicon_origin(origin) {
+        if !hub::valid_favicon_key(origin) {
             return None;
         }
         let (tx, rx) = mpsc::channel();
@@ -1264,9 +1283,7 @@ impl Store for SqliteStore {
 
     fn favicon_rasters(&self, profile: ProfileId, origins: &[String]) -> Vec<(String, Vec<u8>)> {
         if origins.len() > MAX_FAVICON_BATCH_ORIGINS
-            || origins
-                .iter()
-                .any(|origin| !hub::valid_favicon_origin(origin))
+            || origins.iter().any(|origin| !hub::valid_favicon_key(origin))
         {
             return Vec::new();
         }
@@ -1496,6 +1513,43 @@ impl Store for SqliteStore {
     fn clear_chats(&self, profile: ProfileId, since: Option<i64>) -> u32 {
         self.ask(|reply| Cmd::ClearChats(profile, since, reply))
             .unwrap_or_default()
+    }
+
+    fn zoom_levels(&self, profile: ProfileId) -> Vec<zephium_core::zoom::SavedLevel> {
+        self.ask(|reply| Cmd::ZoomLevels(profile, reply))
+            .unwrap_or_default()
+    }
+
+    fn save_zoom_level(
+        &self,
+        profile: ProfileId,
+        site: String,
+        percent: Option<u16>,
+        set_at: i64,
+    ) -> bool {
+        hub::valid_zoom_site(&site)
+            && percent.is_none_or(zephium_core::zoom::valid_percent)
+            && self
+                .tx
+                .try_send(Cmd::SaveZoomLevel(profile, site, percent, set_at))
+                .is_ok()
+    }
+
+    fn popup_sites(
+        &self,
+        profile: ProfileId,
+    ) -> Option<Vec<zephium_core::permissions::PageOrigin>> {
+        self.ask(|reply| Cmd::PopupSites(profile, reply)).flatten()
+    }
+
+    fn set_popup_site(
+        &self,
+        profile: ProfileId,
+        origin: zephium_core::permissions::PageOrigin,
+        allowed: bool,
+    ) -> bool {
+        self.ask(|reply| Cmd::SetPopupSite(profile, origin, allowed, reply))
+            .unwrap_or(false)
     }
 
     fn amend_visit_title(&self, profile: ProfileId, url: String, title: String) -> bool {
@@ -2006,6 +2060,22 @@ fn actor(
             Some(Cmd::ClearChats(profile, since, reply)) => {
                 let _ = reply.send(hub.clear_chats(profile, since));
             }
+            Some(Cmd::ZoomLevels(profile, reply)) => {
+                let _ = reply.send(hub.zoom_levels(profile));
+            }
+            Some(Cmd::SaveZoomLevel(profile, site, percent, set_at)) => {
+                if hub.knows(profile) || flush(&mut hub, &mut pending) {
+                    hub.save_zoom_level(profile, &site, percent, set_at);
+                }
+            }
+            Some(Cmd::PopupSites(profile, reply)) => {
+                let _ = reply.send(hub.popup_sites(profile));
+            }
+            Some(Cmd::SetPopupSite(profile, origin, allowed, reply)) => {
+                let stored = (hub.knows(profile) || flush(&mut hub, &mut pending))
+                    && hub.set_popup_site(profile, &origin, allowed);
+                let _ = reply.send(stored);
+            }
             Some(Cmd::AmendVisitTitle(profile, url, title)) => {
                 hub.amend_visit_title(profile, &url, &title);
             }
@@ -2017,6 +2087,9 @@ fn actor(
             }
             Some(Cmd::SaveFavicon(profile, origin, content_type, bytes)) => {
                 hub.save_favicon(profile, &origin, content_type.as_deref(), &bytes);
+            }
+            Some(Cmd::ForgetPageFavicon(profile, page)) => {
+                hub.forget_page_favicon(profile, &page);
             }
             Some(Cmd::FaviconBytes(profile, origin, reply)) => {
                 let _ = reply.send(hub.favicon_bytes(profile, &origin));

@@ -234,6 +234,7 @@ impl From<BoundedSessionState> for SessionState {
                     zoom: entry.zoom,
                     session_id: entry.session_id,
                     closed_at_ms: entry.closed_at_ms,
+                    position: None,
                 })
                 .collect(),
         }

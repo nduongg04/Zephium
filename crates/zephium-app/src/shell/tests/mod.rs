@@ -14,7 +14,8 @@ use zephium_core::ports::blocker::{
     BlockerShutdownOutcome,
 };
 use zephium_core::ports::engine::{
-    ContentScope, NavigationRequestId, UserContent, UserContentGeneration, ZoomRequestId,
+    ContentScope, HistoryRequestId, NavigationRequestId, UserContent, UserContentGeneration,
+    ZoomRequestId,
 };
 use zephium_core::ports::store::{BlockerConfigLoadOutcome, BlockerConfigUpdateOutcome};
 use zephium_core::ports::store::{
@@ -23,6 +24,7 @@ use zephium_core::ports::store::{
 use zephium_core::session::{
     PersistedItem, PersistedKind, PersistedProfile, PersistedSpace, SessionState,
 };
+use zephium_core::zoom::SavedLevel;
 
 type HeldErasure = (ProfileId, Box<dyn FnOnce(ProfileDataErasureOutcome) + Send>);
 type HeldBlockerUpdate = (
@@ -299,6 +301,7 @@ pub(crate) struct FakeEngine {
     hold_picker: std::sync::atomic::AtomicBool,
     held_picker: Mutex<Option<zephium_core::blocker::ElementPickerCompletion>>,
     calls: Mutex<Vec<String>>,
+    proxies: Mutex<Vec<Option<String>>>,
     previews: Mutex<Vec<Option<zephium_core::ports::engine::DropPreview>>>,
     extension_browser_surfaces: Mutex<Vec<ExtensionBrowserSurface>>,
     extension_action_requests: Mutex<Vec<(ProfileId, ItemId, ExtensionBrowserSurfaceGeneration)>>,
@@ -319,6 +322,7 @@ pub(crate) struct FakeEngine {
             zephium_core::permissions::PagePermissionRequestSettlement,
         )>,
     >,
+    pub(crate) popup_sites: Mutex<Vec<(ProfileId, Vec<String>)>>,
     warm_spare_calls: std::sync::atomic::AtomicUsize,
     media_capture_stops: Mutex<Vec<(ItemId, NavigationPresentationId)>>,
     navigation_requests: Mutex<Vec<NavigationRequestId>>,
@@ -332,6 +336,8 @@ pub(crate) struct FakeEngine {
     reject_navigation_dispatch: std::sync::atomic::AtomicBool,
     reject_discard_dispatch: std::sync::atomic::AtomicBool,
     reject_native_dispatch: std::sync::atomic::AtomicBool,
+    native_favicons: std::sync::atomic::AtomicBool,
+    cannot_mute: std::sync::atomic::AtomicBool,
     unsupported_presentation: std::sync::atomic::AtomicBool,
     runtime_restart_required: std::sync::atomic::AtomicBool,
     runtime_security_advisories: Mutex<zephium_core::runtime_security::RuntimeSecurityAdvisories>,
@@ -342,11 +348,17 @@ pub(crate) struct FakeEngine {
     fills_window_for_fullscreen: std::sync::atomic::AtomicBool,
     fullscreen_exits: Mutex<Vec<ItemId>>,
     layout_regions: Mutex<Vec<Option<Rect>>>,
+    data_calls: Mutex<Vec<(Partition, zephium_core::browsing_data::EngineDataCall)>>,
+    data_reply: Mutex<Option<zephium_core::browsing_data::EngineDataReply>>,
+    download_calls: Mutex<Vec<(Partition, zephium_core::downloads::DownloadCall)>>,
 }
 
 impl FakeEngine {
     fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
+    }
+    fn proxies(&self) -> Vec<Option<String>> {
+        self.proxies.lock().unwrap().clone()
     }
     fn previews(&self) -> Vec<Option<zephium_core::ports::engine::DropPreview>> {
         self.previews.lock().unwrap().clone()
@@ -461,6 +473,41 @@ impl FakeEngine {
 }
 
 impl Engine for FakeEngine {
+    fn browsing_data_call(
+        &self,
+        partition: Partition,
+        call: zephium_core::browsing_data::EngineDataCall,
+        completion: zephium_core::browsing_data::EngineDataCompletion,
+    ) {
+        self.data_calls.lock().unwrap().push((partition, call));
+        let reply = self
+            .data_reply
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(zephium_core::browsing_data::EngineDataReply::Cleared);
+        completion.finish(reply);
+    }
+    fn download_call(
+        &self,
+        partition: Partition,
+        call: zephium_core::downloads::DownloadCall,
+        done: zephium_core::downloads::DownloadCompletion,
+    ) -> bool {
+        self.download_calls.lock().unwrap().push((partition, call));
+        done.finish(zephium_core::downloads::DownloadResponse::Applied);
+        true
+    }
+    fn set_popup_sites(
+        &self,
+        profile: ProfileId,
+        origins: Vec<zephium_core::permissions::PageOrigin>,
+    ) {
+        self.popup_sites
+            .lock()
+            .unwrap()
+            .push((profile, origins.iter().map(ToString::to_string).collect()));
+    }
     fn automatic_pip(&self, id: ItemId, background: bool) -> NativeDispatch {
         self.automatic_pip
             .lock()
@@ -685,6 +732,16 @@ impl Engine for FakeEngine {
         self.log(format!("reload {id}"));
         self.native_admission()
     }
+    fn set_proxy(&self, proxy: Option<zephium_core::proxy::ProxyServer>) {
+        self.proxies
+            .lock()
+            .unwrap()
+            .push(proxy.map(|proxy| proxy.browser_argument()));
+    }
+    fn hard_reload(&self, id: ItemId) -> NativeDispatch {
+        self.log(format!("hard-reload {id}"));
+        self.native_admission()
+    }
     fn stop(&self, _id: ItemId) -> NativeDispatch {
         self.native_admission()
     }
@@ -694,6 +751,14 @@ impl Engine for FakeEngine {
     }
     fn go_forward(&self, id: ItemId) -> NativeDispatch {
         self.log(format!("forward {id}"));
+        self.native_admission()
+    }
+    fn history_entries(&self, id: ItemId, request: HistoryRequestId) -> NativeDispatch {
+        self.log(format!("history-list {id} {}", request.0));
+        self.native_admission()
+    }
+    fn go_to_history_entry(&self, id: ItemId, offset: i32, url: &str) -> NativeDispatch {
+        self.log(format!("history-go {id} {offset} {url}"));
         self.native_admission()
     }
     fn close(&self, id: ItemId) -> NativeDispatch {
@@ -741,8 +806,27 @@ impl Engine for FakeEngine {
         }
         admission
     }
-    fn set_muted(&self, _id: ItemId, _muted: bool) -> NativeDispatch {
-        NativeDispatch::Unsupported
+    fn set_muted(&self, id: ItemId, muted: bool) -> NativeDispatch {
+        if !self.can_mute() {
+            return NativeDispatch::Unsupported;
+        }
+        self.log(format!("mute {id} {muted}"));
+        self.native_admission()
+    }
+    fn can_mute(&self) -> bool {
+        !self.cannot_mute.load(std::sync::atomic::Ordering::Acquire)
+    }
+    fn watch_media(&self, id: ItemId) -> NativeDispatch {
+        self.log(format!("media watch {id}"));
+        self.native_admission()
+    }
+    fn media_action(
+        &self,
+        id: ItemId,
+        action: zephium_core::ports::engine::MediaAction,
+    ) -> NativeDispatch {
+        self.log(format!("media {id} {action:?}"));
+        self.native_admission()
     }
     fn find(
         &self,
@@ -762,12 +846,29 @@ impl Engine for FakeEngine {
     fn capture(&self, _id: ItemId) -> NativeDispatch {
         NativeDispatch::Unsupported
     }
-    fn extract_html(&self, _id: ItemId) -> NativeDispatch {
+    fn extract_html(&self, id: ItemId) -> NativeDispatch {
+        self.log(format!("extract {id}"));
+        self.native_admission()
+    }
+    fn save_page(&self, id: ItemId) -> NativeDispatch {
+        self.log(format!("save {id}"));
+        self.native_admission()
+    }
+    fn autofill_password(&self, id: ItemId) -> NativeDispatch {
+        self.log(format!("autofill {id}"));
         self.native_admission()
     }
     fn discover_favicon(&self, id: ItemId) -> NativeDispatch {
         self.log(format!("discover {id}"));
         self.native_admission()
+    }
+    fn rasterize_favicon(&self, id: ItemId, url: &str) -> NativeDispatch {
+        self.log(format!("rasterize {id} {url}"));
+        self.native_admission()
+    }
+    fn native_favicons(&self) -> bool {
+        self.native_favicons
+            .load(std::sync::atomic::Ordering::Acquire)
     }
     fn probe_discard_safety(&self, id: ItemId, probe: DiscardProbeId) -> bool {
         self.log(format!("probe-discard {id} {}", probe.0));
@@ -802,6 +903,26 @@ impl Engine for FakeEngine {
     }
     fn open_external_app(&self, url: &str) -> NativeDispatch {
         self.log(format!("open-app {url}"));
+        self.native_admission()
+    }
+    fn allow_certificate_exception(&self, item: ItemId, url: String) -> NativeDispatch {
+        self.log(format!("allow-certificate {item} {url}"));
+        self.native_admission()
+    }
+    fn end_unresponsive_page(&self, item: ItemId) -> NativeDispatch {
+        self.log(format!("end-unresponsive {item}"));
+        self.native_admission()
+    }
+    fn answer_http_auth(
+        &self,
+        item: ItemId,
+        request: u32,
+        credentials: Option<zephium_core::http_auth::HttpCredentials>,
+    ) -> NativeDispatch {
+        let answer = credentials.map_or("cancel".to_owned(), |credentials| {
+            format!("sign-in as {}", credentials.username())
+        });
+        self.log(format!("http-auth {item} {request} {answer}"));
         self.native_admission()
     }
     fn set_user_content(
@@ -919,6 +1040,8 @@ pub(crate) struct FakeStore {
     load_session_calls: std::sync::atomic::AtomicUsize,
     pending_deletion_load_calls: std::sync::atomic::AtomicUsize,
     history: Vec<zephium_core::ports::store::HistoryHit>,
+    /// Saved pages `bookmarks` answers a search with, as (title, address).
+    saved_pages: Vec<(&'static str, &'static str)>,
     history_delay_ms: std::sync::atomic::AtomicU64,
     history_started: std::sync::atomic::AtomicBool,
     visits: Mutex<Vec<String>>,
@@ -936,6 +1059,8 @@ pub(crate) struct FakeStore {
     authorized_sessions: Mutex<Vec<(ProfileId, SessionState)>>,
     finalize_outcomes: Mutex<VecDeque<ProfileDeletionFinalizeOutcome>>,
     finalize_unknown_completes: std::sync::atomic::AtomicBool,
+    pub(crate) popup_sites:
+        Mutex<std::collections::HashMap<ProfileId, Vec<zephium_core::permissions::PageOrigin>>>,
     page_permission_load_outcomes: Mutex<VecDeque<PagePermissionCatalogLoadOutcome>>,
     page_permission_mutation_outcomes: Mutex<VecDeque<PagePermissionCatalogMutationOutcome>>,
     page_permission_load_calls: Mutex<Vec<ProfileId>>,
@@ -948,6 +1073,9 @@ pub(crate) struct FakeStore {
     >,
     pub(super) avatars: Mutex<Vec<AvatarWrite>>,
     pub(crate) chat_clears: Mutex<Vec<(ProfileId, Option<i64>)>>,
+    /// Saved page zoom per profile, and how many times each profile was loaded.
+    pub(crate) zoom_saved: Mutex<std::collections::HashMap<ProfileId, Vec<SavedLevel>>>,
+    pub(crate) zoom_loads: std::sync::atomic::AtomicUsize,
     /// Tasks `resource_call` lists, and the searches it was asked for.
     pub(super) task_rows: Mutex<
         Vec<(
@@ -987,6 +1115,33 @@ impl FakeStore {
 }
 
 impl Store for FakeStore {
+    fn popup_sites(
+        &self,
+        profile: ProfileId,
+    ) -> Option<Vec<zephium_core::permissions::PageOrigin>> {
+        Some(
+            self.popup_sites
+                .lock()
+                .unwrap()
+                .get(&profile)
+                .cloned()
+                .unwrap_or_default(),
+        )
+    }
+    fn set_popup_site(
+        &self,
+        profile: ProfileId,
+        origin: zephium_core::permissions::PageOrigin,
+        allowed: bool,
+    ) -> bool {
+        let mut sites = self.popup_sites.lock().unwrap();
+        let list = sites.entry(profile).or_default();
+        list.retain(|site| *site != origin);
+        if allowed {
+            list.push(origin);
+        }
+        true
+    }
     fn resource_call(
         &self,
         _profile: ProfileId,
@@ -1389,6 +1544,35 @@ impl Store for FakeStore {
         }
         self.history.clone()
     }
+    fn bookmarks(
+        &self,
+        _profile: ProfileId,
+        request: zephium_core::bookmarks::BookmarkRequest,
+    ) -> zephium_core::bookmarks::BookmarkReply {
+        use zephium_core::bookmarks::{BookmarkNode, BookmarkReply, BookmarkRequest};
+        let BookmarkRequest::Search { query } = request else {
+            return BookmarkReply::Done;
+        };
+        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        BookmarkReply::Nodes(
+            self.saved_pages
+                .iter()
+                .enumerate()
+                .filter(|(_, (title, url))| {
+                    words.iter().all(|word| {
+                        title.to_lowercase().contains(word) || url.to_lowercase().contains(word)
+                    })
+                })
+                .map(|(at, (title, url))| BookmarkNode {
+                    id: at as i64 + 1,
+                    parent: None,
+                    url: Some((*url).into()),
+                    title: (*title).into(),
+                    children: 0,
+                })
+                .collect(),
+        )
+    }
     fn history_page(
         &self,
         _profile: ProfileId,
@@ -1464,6 +1648,37 @@ impl Store for FakeStore {
         0
     }
 
+    fn zoom_levels(&self, profile: ProfileId) -> Vec<SavedLevel> {
+        self.zoom_loads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.zoom_saved
+            .lock()
+            .unwrap()
+            .get(&profile)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn save_zoom_level(
+        &self,
+        profile: ProfileId,
+        site: String,
+        percent: Option<u16>,
+        set_at: i64,
+    ) -> bool {
+        let mut saved = self.zoom_saved.lock().unwrap();
+        let levels = saved.entry(profile).or_default();
+        levels.retain(|level| level.site != site);
+        if let Some(percent) = percent {
+            levels.push(SavedLevel {
+                site,
+                percent,
+                set_at,
+            });
+        }
+        true
+    }
+
     fn amend_visit_title(&self, _profile: ProfileId, url: String, title: String) -> bool {
         let mut visits = self.recorded_visits.lock().unwrap();
         if let Some(visit) = visits.iter_mut().rev().find(|visit| visit.url == url) {
@@ -1501,6 +1716,9 @@ impl Store for FakeStore {
                     bytes.clone(),
                 )
             })
+    }
+    fn forget_page_favicon(&self, _profile: ProfileId, page: String) {
+        self.icons.lock().unwrap().retain(|(key, _)| key != &page);
     }
     fn favicon_raster_with_age(&self, profile: ProfileId, origin: &str) -> Option<(Vec<u8>, i64)> {
         let age = self.favicon_age(profile, origin)?;
@@ -1736,6 +1954,8 @@ fn apply_projection(view: &mut ItemsState, p: Projection) {
         Projection::Focus(_) => {}
         Projection::OperationProcessed(_) => {}
         Projection::Profiles(_) => {}
+        Projection::RecentlyClosed(_) => {}
+        Projection::MediaPlayer(_) => {}
         Projection::OpenNote { .. } => {}
     }
 }
@@ -2032,22 +2252,28 @@ fn acknowledge_safe_discard(shell: &mut Shell, id: ItemId, probe: DiscardProbeId
 }
 
 mod actor_integration;
+mod audio;
 mod blocker;
 mod bootstrap;
+mod browsing_data;
 mod engine_events;
+mod export;
 mod extension_actions;
 mod extension_browser_requests;
 mod extension_browser_surface;
 mod favicons;
 mod fullscreen;
 mod history;
+mod history_list;
 mod lookup;
+mod media;
 #[path = "navigation.rs"]
 mod navigation_tests;
 mod notes;
 mod onboarding;
 mod operations;
 mod page_permissions;
+mod page_source;
 mod persistence;
 mod presentation;
 mod private;
@@ -2056,6 +2282,7 @@ mod profiles;
 mod projections;
 mod search;
 mod shutdown;
+mod site_permissions;
 mod spaces;
 mod tabs;
 mod time;

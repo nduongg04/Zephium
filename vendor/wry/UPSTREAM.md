@@ -111,7 +111,9 @@ Its security-relevant deltas currently enforce these invariants:
   buffer before budget arithmetic or slicing. Its trusted print method calls
   `ICoreWebView2_16::ShowPrintUI` directly instead of evaluating the same
   page-controlled scripted-print primitives an embedder may deny at document
-  creation. Disabling browser accelerator keys is a construction postcondition:
+  creation. WKWebView printing works on a copy of the shared `NSPrintInfo` and
+  keeps the system margins unless the caller sets some, so printing never
+  rewrites the user's page setup. Disabling browser accelerator keys is a construction postcondition:
   the fork requires `ICoreWebView2Settings3`, applies the setting, and reads it
   back before an untrusted page can load.
 - Desktop navigation callbacks expose one opaque per-WebView identity across
@@ -239,4 +241,6 @@ On Windows the same handler is fed from `NavigationCompleted`'s
 `WebErrorStatus` (cancellation and download conversion stay silent). The
 `ContentLoading` of WebView2's built-in error page is hidden like a commit but
 not reported as one, so the failure lands on the document the person asked for
-and the host can show its own explanation.
+and the host can show its own explanation. The handler's `FailedDocument` says
+when that error document replaced the shown page, with the address from Wry's
+in-flight navigation record; macOS always reports `Kept`.

@@ -17,6 +17,7 @@
   import { operations } from "$domain/operations";
   import { pagePermissions } from "$domain/permissions";
   import { runtime } from "$domain/runtime";
+  import { mediaPlayer } from "$domain/media-player";
   import { updates } from "$domain/updates";
   import { focus } from "$domain/time";
   import { tabs } from "$domain/tabs";
@@ -86,9 +87,13 @@
     });
   });
 
-  let pagePermissionPrompt = $derived(pagePermissions.prompt());
+  // A prompt in the sidebar leaves the page and chrome usable; only the
+  // sheet, shown without that column, holds the window.
+  let pagePermissionSheet = $derived(
+    pagePermissions.prompt()?.in_sidebar === false ? pagePermissions.prompt() : null,
+  );
   let consentActive = $derived(
-    pagePermissionPrompt !== null || webext.review() !== null || webext.accessRequest() !== null,
+    pagePermissionSheet !== null || webext.review() !== null || webext.accessRequest() !== null,
   );
 
   // Page keystrokes are matched natively (menu bar, engine key tables, the
@@ -127,6 +132,8 @@
     const browserPageReady = browserPage.init();
     const preferencesReady = preferences.init();
     const runtimeReady = runtime.init();
+    // Native offers the player with the same bootstrap that supplies tabs.
+    void mediaPlayer.init();
     void focus.init();
     void updates.init();
     void updateNotices.init();
@@ -195,6 +202,7 @@
       operations.dispose();
       blocker.dispose();
       runtime.dispose();
+      mediaPlayer.dispose();
       updates.dispose();
       updateNotices.dispose();
       focus.dispose();
@@ -226,8 +234,8 @@
   {#key webext.accessRequest()!.request}
     <WebExtensionAccessPrompt request={webext.accessRequest()!} />
   {/key}
-{:else if pagePermissionPrompt !== null}
-  {#key `${pagePermissionPrompt.profile_id}:${pagePermissionPrompt.item_id}:${pagePermissionPrompt.request_id}`}
-    <PagePermissionPrompt prompt={pagePermissionPrompt} />
+{:else if pagePermissionSheet !== null}
+  {#key `${pagePermissionSheet.profile_id}:${pagePermissionSheet.item_id}:${pagePermissionSheet.request_id}`}
+    <PagePermissionPrompt prompt={pagePermissionSheet} />
   {/key}
 {/if}

@@ -5,7 +5,8 @@
   import FavIcon from "$shared/ui/FavIcon";
   import { favicons } from "$domain/favicons";
   import CaptureControl from "$shared/ui/CaptureControl";
-  import { stopCaptureFor } from "$domain/capture";
+  import AudioControl from "$shared/ui/AudioControl";
+  import { tabs } from "$domain/tabs";
 
   let {
     tab,
@@ -49,6 +50,7 @@
   data-zephium-tab-id={tab.id}
   data-zephium-tab-url={tab.url ?? ""}
   data-zephium-projection-revision={tab.projection_revision}
+  data-audio-host
   class={["essential", className]}
   data-split-candidate={splitCandidate}
 >
@@ -72,16 +74,25 @@
       size={18}
       lit
       fallback={Globe02Icon}
+      notched={!!tab.audio}
     />
     <span data-zephium-tab-label class="sr-only">{tab.title}</span>
   </button>
+  {#if tab.audio}
+    <AudioControl
+      audio={tab.audio}
+      size={18}
+      onToggle={(muted) => void tabs.setMuted(tab.id, muted)}
+    />
+  {/if}
   {#if tab.capture}
     <span class="capture-badge">
-      {#key tab.capture.navigation_id}<CaptureControl
-          onStop={stopCaptureFor(tab.id, tab.capture.navigation_id)}
-          site={tab.url ?? tab.title}
-          capture={tab.capture}
-        />{/key}
+      <CaptureControl
+        badge
+        onOpen={(x, y) => tabs.openMediaMenu(tab.id, x, y)}
+        site={tab.url ?? tab.title}
+        capture={tab.capture}
+      />
     </span>
   {/if}
 </li>
@@ -94,10 +105,8 @@
 
   .capture-badge {
     position: absolute;
-    inset-inline-end: 0;
-    inset-block-end: 0;
-    background: var(--color-raised);
-    border-radius: var(--radius-capsule);
+    inset-inline-end: 2px;
+    inset-block-end: 2px;
   }
 
   /* A plate of quiet ground and nothing else. A drawn ring made every tile

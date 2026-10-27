@@ -544,6 +544,7 @@ fn scrub_profile_database(path: &Path) -> rusqlite::Result<()> {
          DELETE FROM work_payload_usage;
          DELETE FROM page_permission_grants;
          DELETE FROM page_permission_catalog;
+         DELETE FROM popup_sites;
          DELETE FROM task_list_receipts;
          DELETE FROM task_lists;
          DELETE FROM user_resource_receipts;
@@ -563,6 +564,8 @@ fn scrub_profile_database(path: &Path) -> rusqlite::Result<()> {
          DELETE FROM history;
          DELETE FROM history_usage;
          DELETE FROM favicons;
+         DELETE FROM page_favicons;
+         DELETE FROM site_zoom;
          DELETE FROM settings;
          DELETE FROM items;
          DELETE FROM spaces;
@@ -637,6 +640,16 @@ mod tests {
         )
         .unwrap();
         conn.execute(
+            "INSERT INTO page_favicons(page, icon, fetched_at) VALUES (?1, zeroblob(4096), 1)",
+            [format!("https://history.example/{PROFILE_SCRUB_MARKER}")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO site_zoom(site, percent, set_at) VALUES (?1, 125, 1)",
+            [format!("{PROFILE_SCRUB_MARKER}.example")],
+        )
+        .unwrap();
+        conn.execute(
             "INSERT INTO userscripts(
                  id, revision, enabled, metadata_format, source, source_sha256_v1
              ) VALUES (?1, 1, 1, 1, ?2, ?3)",
@@ -652,6 +665,11 @@ mod tests {
                  id, revision, origin, kind, decision
              ) VALUES (?1, 1, 'https://private.example', 'camera', 'allow')",
             ["00000000000000000000000002"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO popup_sites(origin) VALUES ('https://private.example')",
+            [],
         )
         .unwrap();
         conn.execute("INSERT INTO works(id, schema_version, revision, status, objective, created_unix_ms, updated_unix_ms, lifecycle, objective_revision, context_revision, objective_author) VALUES ('00000000000000000000000001', 2, 1, 'draft', ?1, 1, 1, 'active', 1, 1, 'user')", [PROFILE_SCRUB_MARKER]).unwrap();
@@ -749,8 +767,10 @@ mod tests {
             "history_fts_idx",
             "history_usage",
             "items",
+            "page_favicons",
             "page_permission_catalog",
             "page_permission_grants",
+            "popup_sites",
             "resource_titles_fts",
             "resource_titles_fts_config",
             "resource_titles_fts_data",
@@ -758,6 +778,7 @@ mod tests {
             "resource_titles_fts_idx",
             "search_queries",
             "settings",
+            "site_zoom",
             "spaces",
             "sqlite_sequence",
             "task_list_receipts",
@@ -817,11 +838,14 @@ mod tests {
             "history",
             "history_usage",
             "favicons",
+            "page_favicons",
+            "site_zoom",
             "settings",
             "userscript_catalog",
             "userscripts",
             "page_permission_catalog",
             "page_permission_grants",
+            "popup_sites",
             "works",
             "work_payload_usage",
             "work_plans",

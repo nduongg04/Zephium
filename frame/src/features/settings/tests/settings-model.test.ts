@@ -72,6 +72,16 @@ it("finds every real tab option", async () => {
   }
 });
 
+it("finds the page zoom options", async () => {
+  const { searchSettings } = await import("../lib/settings-model");
+  for (const [query, target] of [
+    ["default zoom", "appearance.zoom"],
+    ["zoom levels", "appearance.zoom-levels"],
+  ]) {
+    expect(searchSettings(query!).some((result) => result.target === target)).toBe(true);
+  }
+});
+
 it("takes each feature's pages out of navigation and search while its switch is off", async () => {
   const off = new Set<string>();
   vi.resetModules();

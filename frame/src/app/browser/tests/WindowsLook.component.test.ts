@@ -24,6 +24,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
   return mockBindings({
+    pagePermissionCardHost: async () => {},
     tabsBootstrap: async () => {},
     sidebarSetWidth: async () => {},
     sidebarResize: async () => false,

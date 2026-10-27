@@ -268,6 +268,17 @@ fn pruning_keeps_only_the_packages_registries_use() {
     assert!(!packages.path().join("removed").exists());
 }
 
+/// How many extensions are on and how many are installed, over every profile.
+pub(in crate::webext) fn counts(extensions: &WebExtensions) -> (usize, usize) {
+    extensions
+        .profiles()
+        .into_iter()
+        .flat_map(|profile| extensions.registry(profile).extensions)
+        .fold((0, 0), |(enabled, total), entry| {
+            (enabled + usize::from(entry.enabled), total + 1)
+        })
+}
+
 pub(in crate::webext) fn restore(extensions: &WebExtensions, shell: &Handle) {
     for profile in extensions.profiles() {
         let mut registry = extensions.registry(profile);

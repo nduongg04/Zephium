@@ -319,6 +319,20 @@ seam this hid behind: a real profile database, the real read queue and the real
 worker loop, driven by the scoped command the shipping surfaces send. Each piece
 had coverage; the path between them had none.
 
+### Bookmarks
+
+Saved pages are offered in the History section, marked with a star. The history
+read also asks the store for bookmarks whose title or address contains every
+word typed (`BookmarkRequest::Search`), so the launcher keeps no second copy of
+the tree to go stale; it runs on the same read worker, in the same request.
+Each bookmark and each visit is scored with `match_quality`, and
+`interleave_bookmarks` puts a bookmark ahead of the first visit it matches at
+least as well. Visits keep their frecency order. Bookmarks draw on the visited
+pages' allowance of four (`capacity_group`), so the list never gets longer, and
+an address that is both saved and visited shows once, as the bookmark. They are
+offered with visited pages turned off, and not in an `@history` search or a
+private profile.
+
 ### Completion and deletion
 
 Deletion is judged against what the field is showing, not against the typed

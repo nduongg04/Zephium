@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { Cancel01Icon, FolderOpenIcon } from "@hugeicons/core-free-icons";
+  import { Cancel01Icon, FolderOpenIcon, PauseIcon } from "@hugeicons/core-free-icons";
   import { DownloadSession, downloadProgress, formatDownloadBytes } from "$domain/downloads";
   import type { DownloadState, DownloadView } from "$shared/ipc/bindings";
   import IconButton from "$shared/ui/IconButton";
@@ -37,15 +37,18 @@
   const EXIT = 140;
 
   const live = (entry: DownloadView) =>
-    ["pending", "receiving", "paused", "cancelling", "finalizing"].includes(entry.state);
+    ["pending", "receiving", "paused", "held", "cancelling", "finalizing"].includes(entry.state);
   let active = $derived(session.entries.filter(live));
   let current = $derived(active[0] ?? session.entries[0]);
   let progress = $derived(current ? downloadProgress(current) : undefined);
   let problem = $derived(
-    current?.state === "failed" || current?.state === "interrupted" || current?.state === "paused",
+    current?.state === "failed" ||
+      current?.state === "interrupted" ||
+      current?.state === "held" ||
+      (current?.state === "paused" && current.error !== null),
   );
   let rate = $derived.by(() => {
-    rates.retain(active.map((entry) => entry.id));
+    rates.retain(active);
     return current?.state === "receiving"
       ? rates.observe(current.id, Number(current.received))
       : null;
@@ -65,8 +68,13 @@
         return formatDownloadBytes(current.total ?? current.received);
       case "cancelled":
         return m.download_cancelled();
+      case "held":
+        return m.download_held_prompt();
+      case "paused":
+        if (!current.error) return m.download_user_paused();
+        return downloadReason(current.error, true);
       default:
-        return downloadReason(current.error, current.state === "paused");
+        return downloadReason(current.error, false);
     }
   });
   let finishedKey = $derived(
@@ -125,7 +133,32 @@
         >
       </span>
     </button>
-    {#if current.state === "pending" || current.state === "receiving" || current.state === "paused"}
+    {#if current.state === "held"}
+      <div class="decision">
+        <button
+          type="button"
+          class="keep"
+          disabled={session.busy}
+          onclick={() => void session.perform({ kind: "keep", id: current.id })}
+          >{m.download_keep()}</button
+        >
+        <button
+          type="button"
+          class="discard"
+          disabled={session.busy}
+          onclick={() => void session.perform({ kind: "discard", id: current.id })}
+          >{m.download_discard()}</button
+        >
+      </div>
+    {:else if current.state === "pending" || current.state === "receiving" || current.state === "paused"}
+      {#if current.state === "receiving"}<IconButton
+          icon={PauseIcon}
+          label={m.download_pause()}
+          size={13}
+          buttonSize={24}
+          disabled={session.busy}
+          onclick={() => void session.perform({ kind: "pause", id: current.id })}
+        />{/if}
       <IconButton
         icon={Cancel01Icon}
         label={m.download_cancel()}
@@ -175,7 +208,7 @@
     flex: none;
     align-items: center;
     gap: 2px;
-    margin: 6px 8px;
+    margin: 6px var(--sidebar-inset);
     padding: 8px 6px 10px 8px;
     overflow: hidden;
     border-radius: var(--radius-row);
@@ -221,6 +254,53 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+
+  /* The question needs its words: it wraps, and the choice sits under it. */
+  .download-card[data-state="held"] {
+    flex-wrap: wrap;
+  }
+
+  .download-card[data-state="held"] .line {
+    white-space: normal;
+  }
+
+  .decision {
+    display: flex;
+    flex-basis: 100%;
+    gap: 6px;
+    padding: 6px 2px 0 40px;
+  }
+
+  .decision button {
+    height: 24px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--color-muted);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: default;
+  }
+
+  .decision .keep {
+    background: var(--color-control);
+    color: var(--color-on-control);
+  }
+
+  .decision button:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  .decision button:disabled {
+    opacity: 0.5;
+  }
+
+  .decision button:hover:not(:disabled) {
+    color: var(--color-text);
   }
 
   .more {

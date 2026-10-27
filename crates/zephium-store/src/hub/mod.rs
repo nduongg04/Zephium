@@ -18,6 +18,7 @@ mod filesystem;
 mod history;
 pub mod media;
 mod page_permissions;
+mod popup_sites;
 pub mod profile_avatars;
 mod resources;
 mod session;
@@ -32,6 +33,8 @@ mod work_document;
 mod work_record_media;
 #[cfg(all(windows, feature = "work-execution"))]
 pub use windows_work_storage::WindowsWorkStorage;
+mod zoom;
+pub(crate) use zoom::valid_zoom_site;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -69,7 +72,7 @@ pub(crate) use compatibility::LEGACY_IMPORT_STATE_KEY;
 #[cfg(test)]
 pub(crate) use compatibility::{LEGACY_HISTORY_MARKER, MAX_SPLIT_JSON_BYTES};
 use deletion::deletion_process_generation;
-pub(crate) use favicons::{valid_favicon_origin, validated_favicon};
+pub(crate) use favicons::{valid_favicon_key, validated_favicon};
 pub(crate) use history::{
     MAX_HISTORY_BYTES, MAX_HISTORY_FORGET_URLS, MAX_HISTORY_PAGE, MAX_HISTORY_QUERY_BYTES,
     MAX_HISTORY_RESULTS,

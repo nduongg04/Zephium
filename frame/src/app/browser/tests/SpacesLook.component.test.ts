@@ -22,6 +22,7 @@ vi.mock("$shared/ipc/bindings", async () => {
   const { mockBindings } = await import("$shared/testing/bindings");
   const ok = async () => ({ accepted: true, operation_id: null });
   return mockBindings({
+    pagePermissionCardHost: async () => {},
     tabsBootstrap: async () => {},
     sidebarSetWidth: async () => {},
     sidebarResize: async () => false,
@@ -289,9 +290,9 @@ for (const theme of ["light", "dark"] as const) {
     sidebar.adoptMode("default");
     await settle();
 
-    // The tray on the address steps the column back under it, as the
+    // The panel on the address steps the column back under it, as the
     // switcher does.
-    await screen.getByRole("button", { name: "Utilities" }).click();
+    await screen.getByRole("button", { name: "Site information" }).click();
     await settle();
     await crop(`${theme}-site-info`);
     away();

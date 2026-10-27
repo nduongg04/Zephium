@@ -63,6 +63,7 @@ function serve(all: HistoryVisitView[]) {
       removed = all.map((entry) => entry.url);
       return { kind: "removed", count: all.length } satisfies HistoryResponse;
     }
+    if (call.kind !== "page") return { kind: "error", error: "invalid" } satisfies HistoryResponse;
     const needle = call.query.toLowerCase();
     const window = { hour: 3600, day: 24 * 3600, week: 7 * 24 * 3600, everything: null }[
       call.range

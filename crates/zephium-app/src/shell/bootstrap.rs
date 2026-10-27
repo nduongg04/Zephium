@@ -11,6 +11,8 @@ impl Shell {
         if self.profile_deletion.failed_closed {
             return;
         }
+        // Before any view exists: none may start out on the wrong route.
+        self.engine.set_proxy(self.proxy.server());
         // Runtime update state is independent of session recovery and chrome
         // reloads. Querying the sticky engine state also repairs a callback
         // that arrived before the shell callback ingress was installed.
@@ -270,10 +272,11 @@ impl Shell {
         let window = self
             .windows
             .create(WindowKind::Main, profile, space, self.pending_size);
-        // Starting with a new tab keeps every restored tab where it was and
-        // loads none of them. A link that launched the browser is its own
+        // Starting with a new tab, or with pages, keeps every restored tab
+        // where it was and loads none of them. A link that launched the browser is its own
         // new tab, and a blank tab left in front already is one.
-        let start_fresh = self.tab_preferences.start_with_new_tab
+        let pages = self.tab_preferences.opens_pages() && self.pending_external.is_empty();
+        let start_fresh = (self.tab_preferences.start_with_new_tab || pages)
             && self.pending_external.is_empty()
             && active_item
                 .is_some_and(|id| self.items.tab(id).is_some_and(|tab| tab.url.is_some()));
@@ -313,6 +316,9 @@ impl Shell {
         self.apply_deferred_web_extensions();
         let waiting = std::mem::take(&mut self.pending_external);
         self.open_external(waiting);
+        if pages {
+            self.open_startup_pages();
+        }
         self.archive_idle_tabs();
         if !retired_settings.is_empty() {
             self.schedule_persist();

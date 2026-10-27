@@ -259,7 +259,7 @@ jobs:
           print(" ".join(sorted(f"{key}={value}" for key, value in items)))'
           }
           main="${APP}/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${APP}/Contents/Info.plist")"
-          allowed="com.apple.security.device.audio-input=True com.apple.security.device.camera=True"
+          allowed="com.apple.security.device.audio-input=True com.apple.security.device.camera=True com.apple.security.personal-information.location=True"
           failed=0
           while IFS= read -r -d '' file; do
             [[ "$(file -b "${file}")" == Mach-O* ]] || continue

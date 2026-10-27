@@ -3,6 +3,7 @@
   import { accountSession as session } from "$domain/account";
   import { profiles } from "$domain/profiles";
   import * as m from "$shared/i18n/messages";
+  import { IS_WINDOWS } from "$shared/platform";
   import Button from "$shared/ui/Button";
   import SettingsRow from "$shared/ui/SettingsRow";
   import AccountDelete from "../account/AccountDelete.svelte";
@@ -55,6 +56,16 @@
     <AccountSignIn />
   {:else}
     <AccountIdentity />
+    {#if account.vault_fault}<div class="fault" role="alert">
+        <p>{IS_WINDOWS ? m.account_vault_fault_windows() : m.account_vault_fault_mac()}</p>
+        <Button
+          size="compact"
+          variant="ghost"
+          pending={busy === "sign_out"}
+          disabled={!!busy && busy !== "sign_out"}
+          onclick={() => void session.signOut()}>{m.account_sign_in_again()}</Button
+        >
+      </div>{/if}
     {#if account.notice}<p class="note" data-tone={account.notice.warning ? "warning" : undefined}>
         {account.notice.text}
       </p>{/if}
@@ -150,6 +161,21 @@
 
   .centred {
     text-align: center;
+  }
+
+  .fault {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 0 18px 24px;
+  }
+
+  .fault p {
+    margin: 0;
+    color: var(--color-warning);
+    font-size: var(--text-label);
+    line-height: 1.5;
   }
 
   .note[data-tone="error"] {

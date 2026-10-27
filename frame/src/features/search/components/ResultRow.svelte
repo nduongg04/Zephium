@@ -5,6 +5,7 @@
     CommandLineIcon,
     Clock01Icon,
     Note01Icon,
+    StarIcon,
   } from "@hugeicons/core-free-icons";
   import type { IconSvgElement } from "@hugeicons/svelte";
   import * as m from "$shared/i18n/messages";
@@ -98,6 +99,8 @@
         return Search01Icon;
       case "search_history":
         return Clock01Icon;
+      case "bookmark":
+        return StarIcon;
       case "note":
         return Note01Icon;
       case "command":
@@ -120,6 +123,8 @@
         return m.launcher_kind_history();
       case "search_history":
         return m.launcher_kind_recent();
+      case "bookmark":
+        return m.launcher_kind_bookmark();
       case "suggestion":
         return m.launcher_kind_suggestion();
       case "note":
