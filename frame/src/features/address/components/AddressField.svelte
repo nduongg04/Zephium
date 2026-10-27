@@ -13,7 +13,7 @@
   import { tabs } from "$domain/tabs";
   import { surface } from "$domain/surface";
   import { uiCommands as ui } from "$domain/ui-commands";
-  import { isHidden, isPeeking } from "$session/sidebar-mode.svelte";
+  import { isHidden, isPeeking, peek } from "$session/sidebar-mode.svelte";
   import { commands } from "$shared/ipc/bindings";
   import Icon from "$shared/ui/Icon";
   import Button from "$shared/ui/Button";
@@ -21,7 +21,7 @@
   import CaptureControl from "$shared/ui/CaptureControl";
   import { preferences } from "$domain/preferences";
   import * as find from "../lib/find.svelte";
-  import { flushSync, untrack, type Snippet } from "svelte";
+  import { flushSync, tick, untrack, type Snippet } from "svelte";
   import { duration, easing, reducedMotion } from "$shared/lib/motion";
   import {
     addressSecurity,
@@ -129,6 +129,19 @@
       if (untrack(() => surface.currentPage()) === "work")
         void commands.runCommand("launcher.toggle");
       else void commands.launcherEdit(tab.id, tab.url);
+      return;
+    }
+    // Without a page to edit, the field itself is wanted: the hidden column
+    // floats up first, since its fields take no focus while it is away. The
+    // focused field then holds it up until the person moves on.
+    if (offscreen) {
+      const field = input;
+      void peek().then(async (onSide) => {
+        if (onSide === null) return;
+        await tick();
+        field.focus();
+        field.select();
+      });
       return;
     }
     input.focus();

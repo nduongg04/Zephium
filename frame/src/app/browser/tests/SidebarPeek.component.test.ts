@@ -38,13 +38,13 @@ const edge = (inside: boolean) =>
   window.dispatchEvent(new CustomEvent("zephium:sidebar-edge", { detail: { inside } }));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function hiddenShell() {
+async function hiddenShell(url: string | null = "https://example.com/", id = "a") {
   native.overlay.mockClear();
   await page.viewport(900, 700);
   launch.dispose();
   await surface.init();
   await tabs.init();
-  const all = [tabFixture({ id: "a", title: "A", url: "https://example.com/" })];
+  const all = [tabFixture({ id, title: "A", url })];
   emitNativeEvent("itemsChanged", {
     projection_revision: revision(Date.now()),
     profile: null,
@@ -57,7 +57,7 @@ async function hiddenShell() {
       kind: { type: "tab", tab_id: tab.id },
     })) as SidebarNodeView[],
     tabs: all,
-    active: "a",
+    active: id,
     split_group: null,
   });
   flushSync();
@@ -91,4 +91,48 @@ test("a pointer that comes onto the rising column keeps it", async () => {
   await sleep(300);
   expect(sidebar.isPeeking()).toBe(true);
   expect(native.overlay.mock.calls.some(([raised]) => !raised)).toBe(false);
+});
+
+// Open popups vanish with the column, so they hold it up; an expanded folder
+// stays open, and holding for it would keep the column up for good.
+test("an open popup holds the floating column, an expanded folder does not", async () => {
+  await hiddenShell();
+  const aside = document.querySelector<HTMLElement>(".browser-sidebar")!;
+  const folder = document.createElement("button");
+  folder.setAttribute("aria-expanded", "true");
+  aside.append(folder);
+  edge(true);
+  await expect.poll(() => sidebar.isPeeking()).toBe(true);
+  edge(false);
+  await expect.poll(() => sidebar.isPeeking()).toBe(false);
+  folder.remove();
+
+  const popup = document.createElement("button");
+  popup.setAttribute("aria-haspopup", "menu");
+  popup.setAttribute("aria-expanded", "true");
+  aside.append(popup);
+  edge(true);
+  await expect.poll(() => sidebar.isPeeking()).toBe(true);
+  edge(false);
+  await sleep(300);
+  expect(sidebar.isPeeking()).toBe(true);
+  popup.remove();
+});
+
+// Without a page to edit in the launcher, Open Location wants the field, which
+// takes no focus while the column is away.
+test("Open Location on a page-less tab floats the column up and focuses its field", async () => {
+  await hiddenShell(null, "blank");
+  const { uiCommands } = await import("$domain/ui-commands");
+  await uiCommands.init();
+  emitNativeEvent("uiCommand", "url.focus");
+  await expect.poll(() => native.overlay.mock.calls.at(-1)?.[0]).toBe(true);
+  await expect
+    .poll(
+      () =>
+        document.activeElement?.closest(".browser-sidebar") !== null &&
+        document.activeElement instanceof HTMLInputElement,
+    )
+    .toBe(true);
+  expect(sidebar.isPeeking()).toBe(true);
 });

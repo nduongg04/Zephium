@@ -184,7 +184,13 @@
   }
   function holding() {
     if (sidebarResizeActive()) return true;
-    if (aside?.querySelector('.sidebar-softens[data-open="true"], [aria-expanded="true"]'))
+    // An open panel or popup, which would vanish with the column. Not an
+    // expanded folder: it stays open, and would hold the column up for good.
+    if (
+      aside?.querySelector(
+        '.sidebar-softens[data-open="true"], [aria-haspopup][aria-expanded="true"]',
+      )
+    )
       return true;
     // Only while this document has the keyboard: a field keeps being the
     // active element after the person has moved on to a page, which would
