@@ -171,6 +171,10 @@
   let aside = $state<HTMLElement>();
   let leaving: ReturnType<typeof setTimeout> | undefined;
   let over = false;
+  // Counts what native says about the pointer, and window blurs. Native only
+  // reports a departure once the column is up, so anything counted while it
+  // rises is newer than the answer raising gives, and wins over it.
+  let heard = 0;
   const LEAVE_DELAY = 0;
   // The slide, both ways; matches --sidebar-slide below.
   const LEAVE_SLIDE = 200;
@@ -211,12 +215,14 @@
   $effect(() => {
     const edge = (event: Event) => {
       if (!(event instanceof CustomEvent) || typeof event.detail?.inside !== "boolean") return;
+      heard++;
       over = event.detail.inside;
       if (over) {
         stay();
+        const asked = heard;
         void peek().then((onSide) => {
           if (onSide === null) return;
-          over = onSide;
+          if (heard === asked) over = onSide;
           if (!over) leave();
         });
       } else {
@@ -235,6 +241,7 @@
     // Native watches only the key window, so leaving it ends the watch.
     const blur = () => {
       out();
+      heard++;
       over = false;
       leave();
     };

@@ -144,7 +144,11 @@ impl Watch {
         if !inside && super::sidebar_resize::capturing() {
             return;
         }
-        if self.ivars().inside.replace(inside) != inside {
+        let changed = self.ivars().inside.replace(inside) != inside;
+        // Leaving the edge before the column is up says nothing: the pointer
+        // is on its way in, and raising answers where it ended up. So every
+        // departure reported comes after that answer, never before it.
+        if changed && (inside || self.ivars().floating.get()) {
             (self.ivars().report)(inside);
         }
     }
