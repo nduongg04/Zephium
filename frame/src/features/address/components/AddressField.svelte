@@ -133,7 +133,12 @@
     }
     // Without a page to edit, the field itself is wanted: the hidden column
     // floats up first, since its fields take no focus while it is away. The
-    // focused field then holds it up until the person moves on.
+    // focused field then holds it up until the person moves on. A rail has
+    // no field to show, so there the launcher stands in, as above.
+    if (offscreen && compact) {
+      void commands.runCommand("launcher.toggle");
+      return;
+    }
     if (offscreen) {
       const field = input;
       void peek().then(async (onSide) => {

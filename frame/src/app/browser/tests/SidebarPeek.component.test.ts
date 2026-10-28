@@ -14,6 +14,7 @@ import Shell from "../Shell.svelte";
 
 const native = vi.hoisted(() => ({
   overlay: vi.fn(async (_raised: boolean, _width: number | null): Promise<boolean | null> => true),
+  run: vi.fn(async (_id: string) => ({ accepted: true, operation_id: null })),
 }));
 vi.mock("$shared/platform", () => ({ IS_MAC: true, IS_WINDOWS: false }));
 vi.mock("$shared/ipc/bindings", async () => {
@@ -27,10 +28,12 @@ vi.mock("$shared/ipc/bindings", async () => {
     sidebarResizeGuide: async () => true,
     settingSet: async () => ({ accepted: true, operation_id: null }),
     pagePermissionCardHost: async () => {},
+    runCommand: native.run,
   });
 });
 afterEach(() => {
   if (sidebar.isHidden()) sidebar.toggleHidden();
+  sidebar.adoptMode("default");
   surface.dispose();
   tabs.dispose();
 });
@@ -135,4 +138,18 @@ test("Open Location on a page-less tab floats the column up and focuses its fiel
     )
     .toBe(true);
   expect(sidebar.isPeeking()).toBe(true);
+});
+
+// A rail draws no field, so a hidden rail answers with the launcher rather
+// than floating up to focus a field nobody can see.
+test("Open Location on a page-less tab opens the launcher from a hidden rail", async () => {
+  await hiddenShell(null, "blank");
+  sidebar.adoptMode("compact");
+  native.run.mockClear();
+  const { uiCommands } = await import("$domain/ui-commands");
+  await uiCommands.init();
+  emitNativeEvent("uiCommand", "url.focus");
+  await expect.poll(() => native.run.mock.calls.at(-1)?.[0]).toBe("launcher.toggle");
+  expect(native.overlay.mock.calls.some(([raised]) => raised)).toBe(false);
+  expect(sidebar.isPeeking()).toBe(false);
 });
