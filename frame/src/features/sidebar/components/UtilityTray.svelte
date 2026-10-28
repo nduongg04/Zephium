@@ -126,7 +126,7 @@
      on one line. */
   :global(.utilities-panel.ui-disclosure-panel) {
     inset-inline-end: -4px;
-    inline-size: min(304px, var(--sidebar-width, 320px));
+    inline-size: var(--address-width, min(304px, var(--sidebar-width, 320px)));
     max-width: none;
     max-block-size: calc(100vh - 120px);
     padding: var(--menu-pad);

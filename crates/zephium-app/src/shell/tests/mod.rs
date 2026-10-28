@@ -787,6 +787,16 @@ impl Engine for FakeEngine {
         self.previews.lock().unwrap().push(preview);
         self.native_admission()
     }
+    fn raise_chrome(
+        &self,
+        window: WindowId,
+        raised: bool,
+        _card: Rect,
+        _slide: bool,
+    ) -> NativeDispatch {
+        self.log(format!("raise@{window} {raised}"));
+        self.native_admission()
+    }
     fn hint_stage_motion(
         &self,
         window: WindowId,
@@ -993,11 +1003,17 @@ impl Engine for FakeEngine {
     }
 }
 
+type BackupClearCallback = Box<dyn FnOnce(bool) + Send>;
+
 type SiteUpdateCallback =
     Box<dyn FnOnce(zephium_core::ports::store::BlockerSiteUpdateOutcome) + Send>;
 
 #[derive(Default)]
 pub(crate) struct FakeStore {
+    backup_clears: Mutex<Vec<ProfileId>>,
+    backup_clear_result: Mutex<Option<bool>>,
+    held_backup_clears: Mutex<Option<Vec<BackupClearCallback>>>,
+    reject_backup_clears: std::sync::atomic::AtomicBool,
     reject_time_clears: std::sync::atomic::AtomicBool,
     reject_focus_records: std::sync::atomic::AtomicBool,
     recorded_focus: Mutex<Vec<zephium_core::time::FocusRecord>>,
@@ -1641,6 +1657,26 @@ impl Store for FakeStore {
             None => visits.clear(),
         }
         u32::try_from(before - visits.len()).unwrap_or(u32::MAX)
+    }
+
+    fn discard_session_backup(
+        &self,
+        profile: ProfileId,
+        done: Box<dyn FnOnce(bool) + Send>,
+    ) -> bool {
+        if self
+            .reject_backup_clears
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return false;
+        }
+        self.backup_clears.lock().unwrap().push(profile);
+        if let Some(held) = &mut *self.held_backup_clears.lock().unwrap() {
+            held.push(done);
+        } else {
+            done(self.backup_clear_result.lock().unwrap().unwrap_or(true));
+        }
+        true
     }
 
     fn clear_chats(&self, profile: ProfileId, since: Option<i64>) -> u32 {
@@ -2292,6 +2328,8 @@ mod work_pane;
 mod zoom;
 
 mod blocker_sites;
+
+mod webext;
 
 #[cfg(target_os = "windows")]
 mod webext_windows;

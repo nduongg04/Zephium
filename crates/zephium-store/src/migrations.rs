@@ -1810,6 +1810,19 @@ pub static META: &[Migration] = &[
             )
         },
     },
+    Migration {
+        version: 28,
+        up: |tx| {
+            tx.execute_batch(
+                "CREATE TABLE session_snapshot_backup (
+                     id INTEGER PRIMARY KEY CHECK (id = 1),
+                     saved_at INTEGER NOT NULL,
+                     schema_version INTEGER NOT NULL,
+                     data BLOB NOT NULL
+                 ) STRICT;",
+            )
+        },
+    },
 ];
 
 fn record_media(tx: &Transaction) -> rusqlite::Result<()> {
@@ -2792,6 +2805,7 @@ mod tests {
         (25, 0xdd0b59247509897e),
         (26, 0x8cf0e4639f17eb73),
         (27, 0x6c555aa33142ef81),
+        (28, 0xdce79131820ba8c9),
     ];
     const PROFILE_SCHEMA_FINGERPRINTS: &[(i64, u64)] = &[
         (1, 0x10b8_b7a3_094f_23d7),

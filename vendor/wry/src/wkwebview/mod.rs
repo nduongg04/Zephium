@@ -7,13 +7,13 @@ mod download;
 mod drag_drop;
 #[cfg(target_os = "macos")]
 pub(crate) mod http_auth;
-#[cfg(target_os = "macos")]
-pub(crate) mod server_trust;
 mod navigation;
-#[cfg(target_os = "macos")]
-mod script_dialog;
 #[cfg(feature = "mac-proxy")]
 mod proxy;
+#[cfg(target_os = "macos")]
+mod script_dialog;
+#[cfg(target_os = "macos")]
+pub(crate) mod server_trust;
 #[cfg(target_os = "macos")]
 mod synthetic_mouse_events;
 mod util;
@@ -1277,7 +1277,10 @@ impl InnerWebView {
         let shared = objc2_app_kit::NSPrintInfo::sharedPrintInfo();
         let print_info: Retained<objc2_app_kit::NSPrintInfo> = objc2::msg_send![&shared, copy];
         let margins = &_options.margins;
-        if margins.top != 0.0 || margins.right != 0.0 || margins.bottom != 0.0 || margins.left != 0.0
+        if margins.top != 0.0
+          || margins.right != 0.0
+          || margins.bottom != 0.0
+          || margins.left != 0.0
         {
           print_info.setTopMargin(margins.top.into());
           print_info.setRightMargin(margins.right.into());

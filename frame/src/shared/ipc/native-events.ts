@@ -55,6 +55,7 @@ function scopedEvent<T>(name: string) {
 // with @tauri-apps/api/event: its listen command accepts a caller-selected
 // target, which would let the launcher panel subscribe to main-window state.
 export const nativeEventNames = {
+  windowsReputationManaged: "zephium:windows-reputation-managed",
   workEnvironmentChanged: "zephium:work-environment-changed",
   workChanged: "zephium:work-changed",
   workHumanChanged: "zephium:work-human-changed",
@@ -99,6 +100,7 @@ export const nativeEventNames = {
 } as const;
 
 export const events = {
+  windowsReputationManaged: scopedEvent<boolean>(nativeEventNames.windowsReputationManaged),
   workEnvironmentChanged: scopedEvent<WorkEnvironmentChanged>(
     nativeEventNames.workEnvironmentChanged,
   ),

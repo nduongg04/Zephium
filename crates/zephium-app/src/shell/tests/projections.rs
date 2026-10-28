@@ -42,7 +42,7 @@ fn items_projection_is_one_ordered_authoritative_focused_sidebar_snapshot() {
     let sibling_tab = ItemId::from(43_009);
     let foreign_tab = ItemId::from(43_010);
 
-    let favorites = Placement::Favorites { profile };
+    let favorites = Placement::Favorites { space };
     let pinned = Placement::Space {
         space,
         section: SpaceSection::Pinned,
@@ -122,7 +122,7 @@ fn items_projection_is_one_ordered_authoritative_focused_sidebar_snapshot() {
                     foreign_tab,
                     None,
                     Placement::Favorites {
-                        profile: foreign_profile,
+                        space: foreign_space,
                     },
                     "foreign.example",
                 ),

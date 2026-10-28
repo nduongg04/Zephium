@@ -167,6 +167,7 @@ fn package(root: &Path, index: u128) -> WebExtensionLoad {
         extension_id: zephium_webext::ExtensionId::from_public_key(&key).to_string(),
         root: dir,
         permissions: vec![],
+        external_native_messaging: false,
         match_patterns: vec![],
         start_background: false,
     }
@@ -271,6 +272,7 @@ fn native_windows_runtime_recovery() {
             extension_id: zephium_webext::ExtensionId::from_public_key(&key).to_string(),
             root: dir,
             permissions: vec![],
+            external_native_messaging: false,
             match_patterns: vec![],
             start_background: false,
         }

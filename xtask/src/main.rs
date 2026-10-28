@@ -12,6 +12,7 @@ mod macos_process_family;
 mod page_assist_boundary;
 mod page_reader_boundary;
 mod password_manager_qa;
+mod updater_sign;
 mod webext_suite;
 mod work_composition_boundary;
 mod work_persistence_boundary;
@@ -46,6 +47,12 @@ fn main() {
         Some("ci") => {
             CI_RESOURCE_PROFILE.store(true, Ordering::Release);
             ci();
+        }
+        Some("sign-windows-updater") => {
+            if let Err(error) = updater_sign::run(&arguments[1..]) {
+                eprintln!("Windows updater signing failed: {error}");
+                exit(1);
+            }
         }
         Some("check-frame-styles") => run("node", &["frame/scripts/check-styles.mjs"]),
         Some("check-engine-floors") => {

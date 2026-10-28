@@ -64,3 +64,40 @@ test("an import that found nothing says so instead of counting zero items brough
   );
   await expect.element(screen.getByText("12 items brought over")).toBeVisible();
 });
+
+test("a refusal by macOS says what to turn on and offers the setting", async () => {
+  const fake = importer();
+  const opened: string[] = [];
+  fake.adapter.openPermissionSettings = async (source) => {
+    opened.push(source);
+  };
+  browserImport.provide(fake.adapter);
+  await browserImport.detect();
+  const screen = await render(Import);
+  await screen.getByRole("radio", { name: "Chrome" }).click();
+  await screen.getByRole("button", { name: "Import", exact: true }).click();
+
+  fake.emit(
+    finished([{ kind: "bookmarks", state: "failed", done: 0, total: null, problem: "permission" }]),
+  );
+  await expect.element(screen.getByText(/Full Disk Access to read Chrome/u)).toBeVisible();
+  await screen.getByRole("button", { name: "Allow access" }).click();
+  expect(opened).toEqual(["chrome"]);
+});
+
+test("a locked browser is not asked about access", async () => {
+  const fake = importer();
+  browserImport.provide(fake.adapter);
+  await browserImport.detect();
+  const screen = await render(Import);
+  await screen.getByRole("radio", { name: "Chrome" }).click();
+  await screen.getByRole("button", { name: "Import", exact: true }).click();
+
+  fake.emit(
+    finished([{ kind: "bookmarks", state: "failed", done: 0, total: null, problem: "busy" }]),
+  );
+  await expect.element(screen.getByText(/Quit Chrome first/u)).toBeVisible();
+  await expect
+    .element(screen.getByRole("button", { name: "Allow access" }))
+    .not.toBeInTheDocument();
+});

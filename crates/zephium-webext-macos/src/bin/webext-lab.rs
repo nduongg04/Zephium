@@ -268,6 +268,10 @@ impl Lab {
                         id,
                         root,
                         grants,
+                        external_native_messaging: step
+                            .get("reviewed_native_app")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                         inspectable: true,
                     };
                     this.runtime.load(spec, move |result| {
@@ -277,6 +281,30 @@ impl Lab {
                 }
                 Err(error) => {
                     println!("LOAD FAILED {error}");
+                    std::process::exit(1);
+                }
+            }
+        } else if step.get("native_open_admission").is_some() {
+            let id = this.extension.borrow().clone().unwrap_or_default();
+            match this.runtime.verify_native_open_admission(&id) {
+                Ok(()) => {
+                    println!("NATIVE OPEN ADMISSION PASSED: matching reviewed context admitted; unreviewed, mismatched, unloaded and ungranted contexts refused");
+                    next();
+                }
+                Err(error) => {
+                    eprintln!("NATIVE OPEN ADMISSION FAILED: {error}");
+                    std::process::exit(1);
+                }
+            }
+        } else if step.get("offscreen_origin_admission").is_some() {
+            let id = this.extension.borrow().clone().unwrap_or_default();
+            match this.runtime.verify_offscreen_origin(&id) {
+                Ok(()) => {
+                    println!("OFFSCREEN ORIGIN PASSED: relative and absolute own pages admitted; cross-scheme and cross-host refused");
+                    next();
+                }
+                Err(error) => {
+                    eprintln!("OFFSCREEN ORIGIN FAILED: {error}");
                     std::process::exit(1);
                 }
             }

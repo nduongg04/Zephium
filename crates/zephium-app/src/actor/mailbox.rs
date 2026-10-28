@@ -66,6 +66,8 @@ enum CoalescedKey {
     Responsiveness(ItemId),
     MemoryPressure,
     SidebarWidth,
+    SidebarHidden,
+    SidebarPeek,
     SidebarGuide,
     SidebarGuideEnd,
     WorkPaneRect,
@@ -337,6 +339,13 @@ fn retain_post_barrier(commands: &mut VecDeque<Command>, command: Command) {
 }
 
 impl CommandQueue {
+    pub(crate) fn is_accepting_commands(&self) -> bool {
+        self.inner
+            .state
+            .lock()
+            .is_ok_and(|state| !state.closed && !state.shutdown_enqueued)
+    }
+
     #[cfg(feature = "work-execution")]
     pub(crate) fn schedule_work(&self, deadline: Option<std::time::Instant>) {
         let mut timer = self
@@ -1282,6 +1291,8 @@ fn command_coalesced_key(command: &Command) -> Option<CoalescedKey> {
         Command::SetWindowVisible(_) => Some(CoalescedKey::WindowVisible),
         Command::SetMemoryPressure(_) => Some(CoalescedKey::MemoryPressure),
         Command::SetSidebarWidth(..) => Some(CoalescedKey::SidebarWidth),
+        Command::SetSidebarHidden(_) => Some(CoalescedKey::SidebarHidden),
+        Command::PeekSidebar { .. } => Some(CoalescedKey::SidebarPeek),
         Command::SidebarResizeGuide(Some(_)) => Some(CoalescedKey::SidebarGuide),
         Command::SidebarResizeGuide(None) => Some(CoalescedKey::SidebarGuideEnd),
         Command::WorkPaneSetRect { .. } => Some(CoalescedKey::WorkPaneRect),

@@ -3,7 +3,9 @@
 use super::*;
 
 use zephium_core::item::sanitize_page_title;
-use zephium_core::ports::store::{HistoryHit, HistoryVisit, ImportedVisit, MAX_IMPORTED_VISITS};
+use zephium_core::ports::store::{
+    HistoryHit, HistoryPageError, HistoryVisit, ImportedVisit, MAX_IMPORTED_VISITS,
+};
 
 pub(crate) const MAX_HISTORY_QUERY_BYTES: usize = 4 * 1024;
 pub(crate) const MAX_HISTORY_RESULTS: u32 = 100;
@@ -197,6 +199,7 @@ impl Hub {
     /// One page of visits, newest first. `history.id` rises with insertion, so
     /// paging on it is exact even when many visits share a second, and it is
     /// the order the primary key already provides.
+    #[cfg(test)]
     pub(crate) fn history_page(
         &mut self,
         profile: ProfileId,
@@ -205,13 +208,26 @@ impl Hub {
         before: Option<i64>,
         limit: u32,
     ) -> Vec<HistoryVisit> {
+        self.history_page_checked(profile, query, since, before, limit)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn history_page_checked(
+        &mut self,
+        profile: ProfileId,
+        query: &str,
+        since: Option<i64>,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<HistoryVisit>, HistoryPageError> {
         if !self.registry.contains(&profile)
             || self.degraded_profiles.contains(&profile)
             || self.recovery_required.is_some()
-            || limit == 0
-            || query.len() > MAX_HISTORY_QUERY_BYTES
         {
-            return Vec::new();
+            return Err(HistoryPageError::Unavailable);
+        }
+        if limit == 0 || query.len() > MAX_HISTORY_QUERY_BYTES {
+            return Err(HistoryPageError::Invalid);
         }
         let trimmed = query.trim();
         let fts = if trimmed.is_empty() {
@@ -219,15 +235,15 @@ impl Hub {
         } else {
             match fts_query(trimmed) {
                 Some(fts) => Some(fts),
-                None => return Vec::new(),
+                None => return Ok(Vec::new()),
             }
         };
         let limit = limit.min(MAX_HISTORY_PAGE);
-        let before = before.unwrap_or(i64::MAX);
+        let mut before = before.unwrap_or(i64::MAX);
         let since = since.unwrap_or(i64::MIN);
-        let Ok(conn) = self.profile_conn(profile) else {
-            return Vec::new();
-        };
+        let conn = self
+            .profile_conn(profile)
+            .map_err(|_| HistoryPageError::Failed)?;
         let sql = if fts.is_some() {
             "SELECT h.id, h.url, h.title, h.visited_at
              FROM history_fts f JOIN history h ON h.id = f.rowid
@@ -248,35 +264,49 @@ impl Hub {
              ORDER BY id DESC
              LIMIT ?5"
         };
-        let Ok(mut stmt) = conn.prepare_cached(sql) else {
-            return Vec::new();
-        };
-        let params = params![
-            before,
-            MAX_URL_BYTES as i64,
-            MAX_TITLE_BYTES as i64,
-            fts.as_deref().unwrap_or_default(),
-            limit,
-            since
-        ];
-        stmt.query_map(params, |row| {
-            Ok(HistoryVisit {
-                id: row.get(0)?,
-                url: row.get(1)?,
-                title: row.get(2)?,
-                visited_at: row.get(3)?,
-            })
-        })
-        .map(|rows| {
-            rows.filter_map(Result::ok)
-                .filter(|visit| navigation::is_allowed_str(&visit.url))
-                .map(|mut visit| {
+        let mut stmt = conn
+            .prepare_cached(sql)
+            .map_err(|_| HistoryPageError::Failed)?;
+        let mut page = Vec::with_capacity(limit as usize);
+        loop {
+            let visits = stmt
+                .query_map(
+                    params![
+                        before,
+                        MAX_URL_BYTES as i64,
+                        MAX_TITLE_BYTES as i64,
+                        fts.as_deref().unwrap_or_default(),
+                        limit,
+                        since
+                    ],
+                    |row| {
+                        Ok(HistoryVisit {
+                            id: row.get(0)?,
+                            url: row.get(1)?,
+                            title: row.get(2)?,
+                            visited_at: row.get(3)?,
+                        })
+                    },
+                )
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                .map_err(|_| HistoryPageError::Failed)?;
+            let exhausted = visits.len() < limit as usize;
+            for mut visit in visits {
+                // Advance over every raw row, including legacy or corrupt
+                // addresses. A short allowed page means actual EOF to export.
+                before = visit.id;
+                if navigation::is_allowed_str(&visit.url) {
                     visit.title = sanitize_page_title(&visit.title);
-                    visit
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+                    page.push(visit);
+                    if page.len() == limit as usize {
+                        return Ok(page);
+                    }
+                }
+            }
+            if exhausted {
+                return Ok(page);
+            }
+        }
     }
 
     /// Keeps visits from another browser with their own times. A visit to the
@@ -338,14 +368,30 @@ impl Hub {
 
     /// Removes every visit to each address. Forgetting one entry in a history
     /// list means forgetting the page, not one of the times it was opened.
+    #[cfg(test)]
     pub(crate) fn forget_history_urls(&mut self, profile: ProfileId, urls: &[String]) -> u32 {
+        self.forget_history_urls_checked(profile, urls)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn forget_history_urls_checked(
+        &mut self,
+        profile: ProfileId,
+        urls: &[String],
+    ) -> Option<u32> {
         if !self.registry.contains(&profile)
             || self.degraded_profiles.contains(&profile)
             || self.recovery_required.is_some()
             || urls.is_empty()
             || urls.len() > MAX_HISTORY_FORGET_URLS
         {
-            return 0;
+            return None;
+        }
+        if let Err(error) = self.discard_session_backup(profile) {
+            eprintln!(
+                "store: forget_history backup disposal failed for profile {profile}: {error}"
+            );
+            return None;
         }
         let result = self.profile_conn(profile).and_then(|conn| {
             let tx = conn.transaction()?;
@@ -368,10 +414,10 @@ impl Hub {
             Ok(removed)
         });
         match result {
-            Ok(removed) => u32::try_from(removed).unwrap_or(u32::MAX),
+            Ok(removed) => Some(u32::try_from(removed).unwrap_or(u32::MAX)),
             Err(e) => {
                 eprintln!("store: forget_history_urls failed for profile {profile}: {e}");
-                0
+                None
             }
         }
     }
@@ -392,6 +438,10 @@ impl Hub {
             || self.degraded_profiles.contains(&profile)
             || self.recovery_required.is_some()
         {
+            return None;
+        }
+        if let Err(error) = self.discard_session_backup(profile) {
+            eprintln!("store: clear_history backup disposal failed for profile {profile}: {error}");
             return None;
         }
         let result = self.profile_conn(profile).and_then(|conn| {

@@ -9,7 +9,7 @@ use zephium_core::extensions::{
     ExtensionActionRevision, ExtensionPopupAnchor, ExtensionRuntimeInstance,
 };
 use zephium_core::geometry::{Rect, Size};
-use zephium_core::ids::{ItemId, ProfileId};
+use zephium_core::ids::{ItemId, ProfileId, SpaceId};
 use zephium_core::ports::blocker::ContentBlocker;
 use zephium_core::ports::chrome::Chrome as GeometryChrome;
 use zephium_core::ports::engine::{DiscardProbeId, Engine, EngineEvent, NavigationPresentationId};
@@ -348,9 +348,14 @@ pub enum Command {
     FocusWake,
     /// A quiet tab's speaker is due to go.
     AudioWake,
-    /// Writes what was read from another browser into the focused profile,
-    /// restoring the session first when it has not been yet (onboarding).
+    /// Captures one persistent destination before any source reads begin,
+    /// restoring the session first for onboarding.
+    ImportDestination {
+        done: ImportDestinationCompletion,
+    },
+    /// Writes one kind into the destination admitted for the whole job.
     Import {
+        destination: ImportDestination,
         work: Box<crate::store_reads::ImportWork>,
         done: ImportCompletion,
     },
@@ -479,6 +484,14 @@ pub enum Command {
     /// shape — a toggle, a snap, a tool opening — that the content should
     /// travel with, rather than by a drag that it should simply follow.
     SetSidebarWidth(f64, bool),
+    /// The sidebar is put away, the page taking the window, or brought back.
+    SetSidebarHidden(bool),
+    /// A hidden sidebar comes over the page, or goes back beneath it, sliding
+    /// as the card does or at once.
+    PeekSidebar {
+        peek: bool,
+        slide: bool,
+    },
     /// Transient Windows resize feedback only; no width or layout mutation.
     SidebarResizeGuide(Option<f64>),
     /// Whether the expanded sidebar is on screen to show a page-permission
@@ -565,6 +578,9 @@ pub enum Command {
     SetWebExtensions {
         profile: ProfileId,
         extensions: Vec<zephium_core::ports::engine::WebExtensionLoad>,
+        /// Package preparation failures for this exact profile/install set.
+        failures: Vec<(zephium_core::ids::ExtensionInstallId, String)>,
+        retry: Option<zephium_core::ids::ExtensionInstallId>,
     },
     /// Opens an extension's options page in a tab.
     OpenWebExtensionOptions {
@@ -613,6 +629,9 @@ pub enum Command {
     CancelSearch {
         session_id: String,
     },
+    /// The launcher's page has just loaded, so it holds none of the icon
+    /// rasters it was sent before.
+    PanelLoaded,
     RunSearchAction {
         context: Box<zephium_ipc::SearchContext>,
         action: zephium_ipc::SearchAction,
@@ -1139,6 +1158,34 @@ impl ExportCompletion {
 impl fmt::Debug for ExportCompletion {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("ExportCompletion")
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportDestination {
+    pub profile: ProfileId,
+    pub space: SpaceId,
+}
+
+#[derive(Clone)]
+pub struct ImportDestinationCompletion(Completion<Option<ImportDestination>>);
+impl ImportDestinationCompletion {
+    pub fn new(done: impl FnOnce(Option<ImportDestination>) + Send + 'static) -> Self {
+        Self(Arc::new(Mutex::new(Some(Box::new(done)))))
+    }
+    pub fn finish(self, profile: Option<ImportDestination>) {
+        let done = self
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        if let Some(done) = done {
+            done(profile);
+        }
+    }
+}
+impl fmt::Debug for ImportDestinationCompletion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ImportDestinationCompletion")
     }
 }
 #[derive(Clone)]

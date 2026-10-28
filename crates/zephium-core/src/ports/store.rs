@@ -31,6 +31,16 @@ pub struct ImportedVisit {
 /// Visits one import may carry; the history budget prunes the oldest after.
 pub const MAX_IMPORTED_VISITS: usize = 50_000;
 
+/// A failed read is distinct from a successfully empty history page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryPageError {
+    Invalid,
+    Unavailable,
+    NotAdmitted,
+    TimedOut,
+    Failed,
+}
+
 /// One recorded visit. Unlike `HistoryHit` these are not deduplicated by
 /// address: a history list shows every time a page was opened.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -545,8 +555,25 @@ pub trait Store {
         before: Option<i64>,
         limit: u32,
     ) -> Vec<HistoryVisit>;
+    /// Completeness-sensitive readers must use this method. Adapters without
+    /// a typed read fail closed rather than treating failures as EOF.
+    fn history_page_checked(
+        &self,
+        _profile: ProfileId,
+        _query: &str,
+        _since: Option<i64>,
+        _before: Option<i64>,
+        _limit: u32,
+    ) -> Result<Vec<HistoryVisit>, HistoryPageError> {
+        Err(HistoryPageError::Unavailable)
+    }
     /// Removes every visit to each address; returns how many rows went.
     fn forget_history_urls(&self, profile: ProfileId, urls: &[String]) -> u32;
+    /// `None` means the deletion or recovery-copy disposal failed. Zero is
+    /// a successful deletion with no matching visits.
+    fn forget_history_urls_checked(&self, profile: ProfileId, urls: &[String]) -> Option<u32> {
+        Some(self.forget_history_urls(profile, urls))
+    }
     /// Visits from another browser, kept with their own times. A visit
     /// already present at the same time is skipped, so importing again adds
     /// only what is new. Returns how many were added, or None when the
@@ -625,6 +652,16 @@ pub trait Store {
     /// successful, distinct result. Legacy stores retain their old contract.
     fn clear_history_checked(&self, profile: ProfileId, since: Option<i64>) -> Option<u32> {
         Some(self.clear_history(profile, since))
+    }
+    /// Disposes recovery copies that may contain this profile's browsing
+    /// data. False means queue refusal, with no completion; admitted calls
+    /// report whether disposal committed. Call for site-data erasure too.
+    fn discard_session_backup(
+        &self,
+        _profile: ProfileId,
+        _done: Box<dyn FnOnce(bool) + Send>,
+    ) -> bool {
+        false
     }
     /// Replaces the placeholder title on the newest recent visit to an address.
     fn amend_visit_title(&self, profile: ProfileId, url: String, title: String) -> bool;

@@ -11,6 +11,8 @@
   const loadNotesPage = () => import("$features/notes").then((notes) => notes.loadNotesPage());
   import LazyView from "$shared/ui/LazyView";
   import type { TabView } from "$shared/ipc/bindings";
+  import { newTabImage } from "$session/newtab-background.svelte";
+  import SkyLight from "./SkyLight.svelte";
   import RenderBoundary from "$shared/ui/RenderBoundary";
   import { loadClearSiteData, loadSettings } from "$features/settings";
   import { EssentialTile } from "$features/essentials";
@@ -263,6 +265,10 @@
     if (!tab || tab.url || (tab.content ?? "web") !== "web") return false;
     return browserPage.currentPage() === null && (!tab.loading || newTabLoad === tab.id);
   });
+  // Beside a new tab the window, whatever it is made of, takes on the
+  // sky's light; it gives it back as a page arrives.
+  let skyShown = $derived(newTabShown && newTabImage() === null);
+
   $effect(() => {
     const tab = tabs.activeTab();
     const idle = !!tab && !tab.url && !tab.loading && (tab.content ?? "web") === "web";
@@ -337,6 +343,7 @@
   data-zephium-surface={browserPage.currentPage() ?? "browse"}
   data-private={incognito || undefined}
 >
+  {#if !newTabImage()}<SkyLight shown={skyShown} />{/if}
   <Sidebar
     >{#snippet browserBody(compact)}
       {#if compact && (inWork || paneled)}

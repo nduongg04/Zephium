@@ -351,7 +351,7 @@ impl Shell {
     /// private window has no such sections and keeps walking every tab.
     pub(super) fn successor_pool(&self, profile: ProfileId, space: SpaceId) -> Vec<ItemId> {
         if self.incognito_profile(profile) {
-            self.keyboard_tabs(profile, space)
+            self.keyboard_tabs(space)
         } else {
             self.regular_tabs(space)
         }
@@ -425,14 +425,12 @@ impl Shell {
     /// The tab in this space already showing exactly `url`, if any.
     pub(super) fn open_tab_for(&self, url: &str) -> Option<ItemId> {
         let window = self.windows.focused()?;
-        self.keyboard_tabs(window.profile, window.space)
-            .into_iter()
-            .find(|id| {
-                self.items.tab(*id).is_some_and(|tab| {
-                    tab.content == zephium_core::item::TabContent::Web
-                        && tab.url.as_ref().is_some_and(|open| open.as_str() == url)
-                })
+        self.keyboard_tabs(window.space).into_iter().find(|id| {
+            self.items.tab(*id).is_some_and(|tab| {
+                tab.content == zephium_core::item::TabContent::Web
+                    && tab.url.as_ref().is_some_and(|open| open.as_str() == url)
             })
+        })
     }
 
     /// Folds a trusted native guest teardown back into the logical tab tree.

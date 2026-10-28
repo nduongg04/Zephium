@@ -3,7 +3,7 @@
 
 use url::Url;
 
-use crate::ids::{ItemId, ProfileId, SpaceId};
+use crate::ids::{ItemId, SpaceId};
 
 pub const MAX_PAGE_TITLE_CHARS: usize = 512;
 
@@ -99,12 +99,12 @@ pub enum SpaceSection {
     Today,
 }
 
-/// Where an item lives: the profile-wide favorites grid, or a section of a
+/// Where an item lives: a space's Essentials (`Favorites`), or a section of a
 /// space. Children of a folder share the folder's placement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Placement {
     Favorites {
-        profile: ProfileId,
+        space: SpaceId,
     },
     Space {
         space: SpaceId,

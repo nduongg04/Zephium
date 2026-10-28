@@ -771,7 +771,9 @@ impl Shell {
             Command::SetWebExtensions {
                 profile,
                 extensions,
-            } => self.set_web_extensions(profile, extensions),
+                failures,
+                retry,
+            } => self.set_prepared_web_extensions(profile, extensions, failures, retry),
             Command::OpenWebExtensionOptions {
                 profile,
                 extension_id,
@@ -955,6 +957,30 @@ impl Shell {
                 }
                 let _ = self.relayout_with(animate);
             }
+            Command::SetSidebarHidden(hidden) => {
+                let Some(win) = self.windows.focused_mut() else {
+                    return;
+                };
+                if win.metrics.sidebar_hidden == hidden {
+                    return;
+                }
+                win.metrics.sidebar_hidden = hidden;
+                let id = win.id;
+                // A sidebar shown from its card leaves the chrome over the
+                // page until the page has slid out from under the column;
+                // the frame puts it back beneath then.
+                let _ = self.engine.hint_stage_motion(id, StageMotion::Slide);
+                let _ = self.relayout_with(true);
+            }
+            Command::PeekSidebar { peek, slide } => {
+                if let Some(win) = self.windows.focused() {
+                    // Only a hidden sidebar is beneath the page to come over it.
+                    if !peek || win.metrics.sidebar_hidden {
+                        let card = layout::hidden_card(win.size, win.metrics);
+                        let _ = self.engine.raise_chrome(win.id, peek, card, slide);
+                    }
+                }
+            }
             Command::SetPagePermissionCardHost(available) => {
                 self.set_page_permission_card_host(available)
             }
@@ -1022,7 +1048,12 @@ impl Shell {
                 call,
                 done,
             } => self.bookmark_call(expected_profile, *call, done),
-            Command::Import { work, done } => self.import_into_focused(*work, done),
+            Command::ImportDestination { done } => done.finish(self.import_destination()),
+            Command::Import {
+                destination,
+                work,
+                done,
+            } => self.import_into_profile(destination, *work, done),
             Command::Export { kind, done } => self.export_from_focused(kind, done),
             Command::AttachFaviconProber(attachment) => self.attach_favicon_prober(attachment.0),
             Command::ProbeFavicons { profile, origins } => self.probe_favicons(profile, origins),
@@ -1232,6 +1263,9 @@ impl Shell {
             } => self.search_additional(*context, query, results),
             Command::SearchScoped { query, context } => self.search_scoped(&query, *context),
             Command::CancelSearch { session_id } => self.cancel_scoped_search(&session_id),
+            Command::PanelLoaded => {
+                self.forget_delivered_icons(zephium_ipc::IconSurface::Panel);
+            }
             Command::RunSearchAction {
                 context,
                 action,

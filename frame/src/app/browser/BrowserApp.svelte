@@ -41,7 +41,8 @@
   // the page's slide short.
   $effect(() => {
     const mode = preferences.value("sidebar.mode");
-    if (mode === "default" || mode === "compact") untrack(() => sidebar.adoptMode(mode));
+    if (mode === "default" || mode === "compact" || mode === "hidden")
+      untrack(() => sidebar.adoptMode(mode));
   });
 
   $effect(() => {

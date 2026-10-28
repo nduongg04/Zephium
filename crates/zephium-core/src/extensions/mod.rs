@@ -6,6 +6,7 @@
 mod action;
 mod active_profiles;
 mod browser_surface;
+mod registry_io;
 mod runtime;
 
 pub use action::{
@@ -29,3 +30,5 @@ pub use browser_surface::{
     MAX_PENDING_EXTENSION_BROWSER_REQUESTS_PER_PROFILE,
 };
 pub use runtime::{ExtensionRuntimeGeneration, ExtensionRuntimeInstance};
+
+pub use registry_io::{ExtensionPublicationTicket, ExtensionRegistryIo, REGISTRY_IO};

@@ -313,10 +313,12 @@ export const commands = {
 	 *  returns what the user is asked to approve.
 	 */
 	webExtensionPrepare: (tabId: string) => typedError<WebExtensionReview, string>(__TAURI_INVOKE("web_extension_prepare", { tabId })),
-	webExtensionConfirm: (id: string) => typedError<null, string>(__TAURI_INVOKE("web_extension_confirm", { id })),
-	webExtensionCancel: () => __TAURI_INVOKE<void>("web_extension_cancel"),
+	webExtensionConfirm: (id: string, reviewId: string) => typedError<null, string>(__TAURI_INVOKE("web_extension_confirm", { id, reviewId })),
+	webExtensionCancel: (reviewId: string) => __TAURI_INVOKE<void>("web_extension_cancel", { reviewId }),
 	webExtensionList: () => typedError<WebExtensionView[], string>(__TAURI_INVOKE("web_extension_list")),
 	webExtensionSetEnabled: (id: string, enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("web_extension_set_enabled", { id, enabled })),
+	/**  Retries only the exact installation displayed in the Extensions page. */
+	webExtensionRetry: (profileId: string, installId: string) => typedError<null, string>(__TAURI_INVOKE("web_extension_retry", { profileId, installId })),
 	webExtensionUninstall: (id: string) => typedError<null, string>(__TAURI_INVOKE("web_extension_uninstall", { id })),
 	/**
 	 *  Answers an extension's run-time request for access; granted access is
@@ -335,6 +337,8 @@ export const commands = {
 	 *  cancel the picker.
 	 */
 	webExtensionChooseFile: (folder: boolean) => typedError<{
+	/**  Identifies the package/profile shown by this particular review. */
+	review_id: string,
 	id: string,
 	name: string,
 	version: string,
@@ -495,6 +499,9 @@ export const commands = {
 	launcherOpenAccessibility: () => __TAURI_INVOKE<void>("launcher_open_accessibility"),
 	settingGet: (key: string) => __TAURI_INVOKE<string | null>("setting_get", { key }),
 	settingSet: (key: string, value: string) => __TAURI_INVOKE<OperationAdmission>("setting_set", { key, value }),
+	windowsDiagnosticsSettings: () => __TAURI_INVOKE<boolean>("windows_diagnostics_settings"),
+	/**  None identifies a local launch-read fallback to ON, separate from Windows policy. */
+	windowsReputationManaged: () => __TAURI_INVOKE<boolean | null>("windows_reputation_managed"),
 	uiInfo: () => __TAURI_INVOKE<UiInfo>("ui_info"),
 	uiReady: () => __TAURI_INVOKE<boolean>("ui_ready"),
 	menuPopup: (x: number | null, y: number | null) => __TAURI_INVOKE<boolean>("menu_popup", { x, y }),
@@ -521,6 +528,15 @@ export const commands = {
 	launcherSearch: (query: string, requestId: string) => __TAURI_INVOKE<boolean>("launcher_search", { query, requestId }),
 	launcherRun: (action: SearchAction, context: SearchContext, background: boolean) => __TAURI_INVOKE<OperationAdmission>("launcher_run", { action, context, background }),
 	sidebarSetWidth: (width: number | null, animate: boolean, revision: number | null) => __TAURI_INVOKE<void>("sidebar_set_width", { width, animate, revision }),
+	/**  Puts the sidebar away, the page taking the window, or brings it back. */
+	sidebarSetHidden: (hidden: boolean) => __TAURI_INVOKE<void>("sidebar_set_hidden", { hidden }),
+	/**
+	 *  Brings a hidden sidebar over the page while the pointer wants it, or puts
+	 *  it back beneath. The window controls show with the card, and leave the
+	 *  moment it starts to go rather than once it has. `slide` has a platform that
+	 *  cuts the chrome to the card follow it in and out.
+	 */
+	sidebarPeek: (peek: boolean, lights: boolean, slide: boolean) => __TAURI_INVOKE<void>("sidebar_peek", { peek, lights, slide }),
 	sidebarResize: (width: number | null, enabled: boolean, revision: number | null) => __TAURI_INVOKE<boolean>("sidebar_resize", { width, enabled, revision }),
 	sidebarResizeGuide: (width: number | null) => __TAURI_INVOKE<boolean>("sidebar_resize_guide", { width }),
 	tabDragOver: (x: number | null, y: number | null) => __TAURI_INVOKE<void>("tab_drag_over", { x, y }),
@@ -2060,7 +2076,7 @@ export type PageAssistBlockV1 =
  */
 { kind: "text"; text: string; cites: PageAssistCiteV1[] } |
 /**  Item cards; `tab` is the page their marks are on. */
-{ kind: "items"; tab: string; items: PageAssistItemV1[] } | { kind: "opened"; tabs: PageAssistOpenedV1[] } | { kind: "steps"; steps: PageAssistStepV1[] } | { kind: "paused"; reason: PageAssistPauseV1 } | { kind: "style"; style: PageStyleProposalV1 } | { kind: "handoff"; handoff: PageAssistHandoffV1 };
+{ kind: "items"; tab: string; items: PageAssistItemV1[] } | { kind: "opened"; tabs: PageAssistOpenedV1[] } | { kind: "steps"; steps: PageAssistStepV1[] } | { kind: "search"; destination: string; query: string; state: PageAssistStepStateV1 } | { kind: "paused"; reason: PageAssistPauseV1 } | { kind: "style"; style: PageStyleProposalV1 } | { kind: "handoff"; handoff: PageAssistHandoffV1 };
 
 /**  What a Work handoff brings along. */
 export type PageAssistBringKindV1 = "task" | "note" | "tab" | "repository" | "folder" |
@@ -3484,6 +3500,8 @@ export type WebExtensionAccessRequestView = {
 export type WebExtensionAccessRequested = WebExtensionAccessRequestView;
 
 export type WebExtensionReview = {
+	/**  Identifies the package/profile shown by this particular review. */
+	review_id: string,
 	id: string,
 	name: string,
 	version: string,
@@ -3496,6 +3514,8 @@ export type WebExtensionReview = {
 };
 
 export type WebExtensionView = {
+	profile_id: string,
+	install_id: string,
 	id: string,
 	name: string,
 	version: string,
@@ -3649,6 +3669,11 @@ export type WorkActivityV1 = "planning" | "delegating" | "searching" | "reading"
 export type WorkAgentGrantV1 = WorkAgentGrantV1_Serialize | WorkAgentGrantV1_Deserialize;
 
 export type WorkAgentGrantV1_Deserialize = {
+	/**
+	 *  Trusted resolved pricing fact: all models are free and browser search
+	 *  has no paid fallback. This grants no capability or disclosure authority.
+	 */
+	no_usage_charge?: boolean,
 	provider: WorkSearchProvider,
 	model: string,
 	max_turns: number,
@@ -3686,6 +3711,11 @@ export type WorkAgentGrantV1_Deserialize = {
 };
 
 export type WorkAgentGrantV1_Serialize = {
+	/**
+	 *  Trusted resolved pricing fact: all models are free and browser search
+	 *  has no paid fallback. This grants no capability or disclosure authority.
+	 */
+	no_usage_charge?: boolean,
 	provider: WorkSearchProvider,
 	model: string,
 	max_turns: number,
@@ -4007,6 +4037,8 @@ export type WorkAttemptFact = {
 	/**
 	 *  Reservation is retained for unknown outcomes. Settled accounting names
 	 *  exact usage or a conservative ceiling; missing means unknown, never zero.
+	 *  A trusted no-charge agent may retain a known-zero monetary reservation
+	 *  while its token counts and native outcome remain uncertain.
 	 */
 	usage: WorkUsage | null,
 };

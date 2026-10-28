@@ -7,6 +7,7 @@ pub mod archive;
 pub mod crx;
 pub mod id;
 pub mod manifest;
+pub mod package;
 pub mod permissions;
 pub mod prepare;
 pub mod store;

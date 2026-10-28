@@ -28,7 +28,7 @@ use zephium_core::navigation;
 use zephium_core::permissions::{PagePermissionCatalogRevision, PagePermissionPatch};
 use zephium_core::ports::store::{
     BlockerConfigLoadOutcome, BlockerConfigUpdateOutcome, BlockerSiteLoadOutcome,
-    BlockerSiteUpdateOutcome, ChatSummary, HistoryHit, HistoryVisit,
+    BlockerSiteUpdateOutcome, ChatSummary, HistoryHit, HistoryPageError, HistoryVisit,
     PagePermissionCatalogLoadOutcome, PagePermissionCatalogMutationOutcome,
     ProfileDeletionAuthorizeOutcome, ProfileDeletionFinalizeOutcome, ProfileDeletionLoad,
     SessionLoad, Store, StoreShutdownOutcome, UserscriptCatalogLoadOutcome,
@@ -387,9 +387,9 @@ enum Cmd {
         since: Option<i64>,
         before: Option<i64>,
         limit: u32,
-        reply: Sender<Vec<HistoryVisit>>,
+        reply: Sender<Result<Vec<HistoryVisit>, HistoryPageError>>,
     },
-    ForgetHistoryUrls(ProfileId, Vec<String>, Sender<u32>),
+    ForgetHistoryUrls(ProfileId, Vec<String>, Sender<Option<u32>>),
     ImportHistory(
         ProfileId,
         Vec<zephium_core::ports::store::ImportedVisit>,
@@ -402,6 +402,7 @@ enum Cmd {
         Sender<zephium_core::bookmarks::BookmarkReply>,
     ),
     ClearHistory(ProfileId, Option<i64>, Sender<Option<u32>>),
+    DiscardSessionBackup(ProfileId, Box<dyn FnOnce(bool) + Send>),
     Chats(ProfileId, u32, Sender<Vec<ChatSummary>>),
     Chat(ProfileId, String, Sender<Option<String>>),
     SaveChat {
@@ -1364,12 +1365,23 @@ impl Store for SqliteStore {
         before: Option<i64>,
         limit: u32,
     ) -> Vec<HistoryVisit> {
+        self.history_page_checked(profile, query, since, before, limit)
+            .unwrap_or_default()
+    }
+
+    fn history_page_checked(
+        &self,
+        profile: ProfileId,
+        query: &str,
+        since: Option<i64>,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<HistoryVisit>, HistoryPageError> {
         if limit == 0 || query.len() > MAX_HISTORY_QUERY_BYTES {
-            return Vec::new();
+            return Err(HistoryPageError::Invalid);
         }
         let (tx, rx) = mpsc::channel();
-        if self
-            .tx
+        self.tx
             .try_send(Cmd::HistoryPage {
                 profile,
                 query: query.to_owned(),
@@ -1378,26 +1390,28 @@ impl Store for SqliteStore {
                 limit: limit.min(hub::MAX_HISTORY_PAGE),
                 reply: tx,
             })
-            .is_err()
-        {
-            return Vec::new();
-        }
-        rx.recv_timeout(STORE_RPC_TIMEOUT).unwrap_or_default()
+            .map_err(|_| HistoryPageError::NotAdmitted)?;
+        rx.recv_timeout(STORE_RPC_TIMEOUT)
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => HistoryPageError::TimedOut,
+                mpsc::RecvTimeoutError::Disconnected => HistoryPageError::Unavailable,
+            })?
     }
 
     fn forget_history_urls(&self, profile: ProfileId, urls: &[String]) -> u32 {
+        self.forget_history_urls_checked(profile, urls)
+            .unwrap_or_default()
+    }
+
+    fn forget_history_urls_checked(&self, profile: ProfileId, urls: &[String]) -> Option<u32> {
         if urls.is_empty() || urls.len() > hub::MAX_HISTORY_FORGET_URLS {
-            return 0;
+            return None;
         }
         let (tx, rx) = mpsc::channel();
-        if self
-            .tx
+        self.tx
             .try_send(Cmd::ForgetHistoryUrls(profile, urls.to_vec(), tx))
-            .is_err()
-        {
-            return 0;
-        }
-        rx.recv_timeout(STORE_RPC_TIMEOUT).unwrap_or_default()
+            .ok()?;
+        rx.recv_timeout(STORE_RPC_TIMEOUT).ok().flatten()
     }
 
     fn import_history(
@@ -1460,6 +1474,16 @@ impl Store for SqliteStore {
             return None;
         }
         rx.recv_timeout(STORE_RPC_TIMEOUT).ok().flatten()
+    }
+
+    fn discard_session_backup(
+        &self,
+        profile: ProfileId,
+        done: Box<dyn FnOnce(bool) + Send>,
+    ) -> bool {
+        self.tx
+            .try_send(Cmd::DiscardSessionBackup(profile, done))
+            .is_ok()
     }
 
     fn chats(&self, profile: ProfileId, limit: u32) -> Vec<ChatSummary> {
@@ -1725,6 +1749,9 @@ fn actor(
     let mut setting_retry = WriteRetry::default();
     let mut activity = PendingActivityWrites::default();
     loop {
+        if let Err(error) = hub.prune_expired_session_backup() {
+            eprintln!("store: session backup expiration failed: {error}");
+        }
         let deadline = pending
             .as_ref()
             .map(PendingSession::deadline)
@@ -1732,6 +1759,7 @@ fn actor(
             .chain(visit_retry.retry_at)
             .chain(setting_retry.retry_at)
             .chain(activity.deadline())
+            .chain(hub.session_backup_deadline())
             .min();
         let cmd = if let Some(deadline) = deadline {
             let wait = deadline.saturating_duration_since(Instant::now());
@@ -2008,10 +2036,18 @@ fn actor(
                 limit,
                 reply,
             }) => {
-                let _ = reply.send(hub.history_page(profile, &query, since, before, limit));
+                let _ = reply.send(hub.history_page_checked(profile, &query, since, before, limit));
             }
             Some(Cmd::ForgetHistoryUrls(profile, urls, reply)) => {
-                let _ = reply.send(hub.forget_history_urls(profile, &urls));
+                let session_durable = hub.knows(profile) || flush(&mut hub, &mut pending);
+                let visits_durable = session_durable
+                    && flush_profile_visits(&mut hub, &pending_visits, &mut visit_retry, profile);
+                let result = if visits_durable {
+                    hub.forget_history_urls_checked(profile, &urls)
+                } else {
+                    None
+                };
+                let _ = reply.send(result);
             }
             Some(Cmd::ImportHistory(profile, visits, reply)) => {
                 let _ = reply.send(hub.import_history(profile, &visits));
@@ -2034,6 +2070,19 @@ fn actor(
                     None
                 };
                 let _ = reply.send(result);
+            }
+            Some(Cmd::DiscardSessionBackup(profile, done)) => {
+                let result = if hub.knows(profile) || flush(&mut hub, &mut pending) {
+                    hub.discard_session_backup(profile)
+                } else {
+                    Err(rusqlite::Error::InvalidQuery)
+                };
+                if let Err(error) = &result {
+                    eprintln!("store: session backup disposal failed: {error}");
+                }
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    done(result.is_ok());
+                }));
             }
             Some(Cmd::Chats(profile, limit, reply)) => {
                 let _ = reply.send(hub.chats(profile, limit));

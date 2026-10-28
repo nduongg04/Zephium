@@ -6,7 +6,11 @@ import { tabs } from "$domain/tabs";
 import { preferences } from "$domain/preferences";
 import AddressFieldHost from "./AddressFieldHost.svelte";
 
-const native = vi.hoisted(() => ({ defaultZoom: "100", page: null as string | null }));
+const native = vi.hoisted(() => ({
+  defaultZoom: "100",
+  page: null as string | null,
+  edit: vi.fn(async () => true),
+}));
 
 vi.mock("$domain/surface", () => ({ surface: { currentPage: () => native.page } }));
 vi.mock("$domain/permissions", () => ({
@@ -25,6 +29,7 @@ vi.mock("$shared/ipc/bindings", async () => {
   return mockBindings({
     tabsBootstrap: async () => {},
     runCommand: async () => ({ accepted: true, operation_id: null }),
+    launcherEdit: native.edit,
     settingGet: async (key: string) => (key === "zoom.default" ? native.defaultZoom : null),
   });
 });
@@ -39,6 +44,7 @@ afterEach(() => {
   preferences.dispose();
   native.defaultZoom = "100";
   native.page = null;
+  native.edit.mockClear();
 });
 
 async function field(props: { compact?: boolean } = {}) {
@@ -61,6 +67,14 @@ async function field(props: { compact?: boolean } = {}) {
   const input = screen.container.querySelector<HTMLInputElement>("[data-zephium-address]")!;
   return { screen, input };
 }
+
+test("a click on a page's address edits it here, and only the shortcut opens the launcher", async () => {
+  const { screen, input } = await field();
+  await screen.getByRole("textbox", { name: /address/iu }).click();
+  expect(document.activeElement).toBe(input);
+  await expect.poll(() => input.value).toBe("https://www.wikipedia.org/wiki/Premium");
+  expect(native.edit).not.toHaveBeenCalled();
+});
 
 test("editing shows the whole address and rests on the host", async () => {
   const { input } = await field();

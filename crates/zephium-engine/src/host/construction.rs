@@ -1390,21 +1390,39 @@ impl EngineHost {
                     }
                     *observed = Some(environment.clone());
                 });
+            let resource_save = Rc::new(super::page_open::ResourceSave::default());
             {
                 let menu_permit = event_permit.clone();
                 let menu_navigation = navigation.clone();
                 let menu_presentation = presentation_permit.clone();
+                let menu_save = resource_save.clone();
                 builder = builder.with_native_context_menu_handler(move |controller, args| {
-                    super::page_open::filter_windows_context_menu(
+                    let admitted = super::page_open::filter_windows_context_menu(
                         &menu_permit,
                         &menu_navigation,
                         &menu_presentation,
                         controller,
                         args,
-                    )
+                    );
+                    menu_save.menu(&menu_navigation, args, admitted);
+                    admitted
                 });
             }
             if let Some(downloads) = &self.downloads {
+                let save = resource_save.clone();
+                let save_permit = event_permit.clone();
+                let save_navigation = navigation.clone();
+                let save_presentation = presentation_permit.clone();
+                let save_intent = download_surface_intent.clone();
+                builder = builder.with_native_resource_save_handler(move |controller| {
+                    let foreground = save_intent.load(Ordering::Acquire)
+                        && super::page_open::windows_context_foreground(
+                            &save_permit,
+                            &save_presentation,
+                            controller,
+                        );
+                    save.authorize(&save_navigation, foreground)
+                });
                 let downloads = Rc::downgrade(downloads);
                 let download_permit = event_permit.clone();
                 let download_intent = download_surface_intent.clone();
@@ -1434,7 +1452,11 @@ impl EngineHost {
                                 download_permit.clone(),
                                 download_intent.clone(),
                                 download_navigation.clone(),
-                                (controller, event),
+                                (
+                                    controller,
+                                    event,
+                                    resource_save.take_download(&download_navigation),
+                                ),
                                 started.map(|on_started| super::downloads::InitialDownload {
                                     on_started: Some(on_started),
                                 }),
@@ -1445,6 +1467,8 @@ impl EngineHost {
             if let Some(environment) = cached_environment {
                 builder = builder.with_environment(environment);
             }
+            builder = builder
+                .with_controller_initialization_hook(|_, core| crate::reputation::configure(core));
             if let Some(startup) = extension_startup {
                 builder = builder.with_browser_extension_startup_gate(move |environment, core| {
                     startup.authenticate(environment, core)
@@ -2799,6 +2823,8 @@ impl EngineHost {
             } else {
                 builder
             };
+            let builder = builder
+                .with_controller_initialization_hook(|_, core| crate::reputation::configure(core));
             if let Some(startup) = startup {
                 builder.with_browser_extension_startup_gate(move |environment, core| {
                     startup.authenticate(environment, core)

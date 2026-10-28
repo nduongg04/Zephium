@@ -139,7 +139,7 @@ impl Shell {
         };
         let placement = if essential {
             Placement::Favorites {
-                profile: window.profile,
+                space: window.space,
             }
         } else {
             Placement::Space {
@@ -1115,7 +1115,7 @@ impl Shell {
         let Some(active) = win.active else {
             return operation_result(OperationOutcome::NoOp, OperationReason::NoFocusedWindow);
         };
-        let tabs = self.keyboard_tabs(win.profile, win.space);
+        let tabs = self.keyboard_tabs(win.space);
         let Some(position) = tabs.iter().position(|id| *id == active) else {
             return operation_result(OperationOutcome::Rejected, OperationReason::InvalidScope);
         };
@@ -1132,7 +1132,7 @@ impl Shell {
         let Some(win) = self.windows.focused() else {
             return operation_result(OperationOutcome::NoOp, OperationReason::NoFocusedWindow);
         };
-        let tabs = self.keyboard_tabs(win.profile, win.space);
+        let tabs = self.keyboard_tabs(win.space);
         let target = match position {
             Some(position) => position.checked_sub(1).and_then(|index| tabs.get(index)),
             None => tabs.last(),

@@ -297,9 +297,8 @@ define_class!(
           let responder = crate::wkwebview::http_auth::responder(completion_handler);
           // A panicking embedder drops the responder while unwinding, which
           // cancels the native request.
-          let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            handler(request, responder)
-          }));
+          let _ =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(request, responder)));
           return;
         }
       }

@@ -191,6 +191,7 @@ impl WebextHost {
                 permissions: load.permissions,
                 match_patterns: load.match_patterns,
             },
+            external_native_messaging: load.external_native_messaging,
             inspectable: true,
         };
         let install = load.install;
@@ -278,6 +279,7 @@ impl WebextHost {
                 permissions: load.permissions,
                 match_patterns: load.match_patterns,
             },
+            external_native_messaging: false,
             inspectable: false,
         };
         entry.runtime.load(spec, move |_| {

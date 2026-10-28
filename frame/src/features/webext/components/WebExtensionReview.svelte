@@ -24,7 +24,7 @@
     if (event.key === "Escape" && !busy) {
       event.preventDefault();
       event.stopPropagation();
-      webext.cancel();
+      webext.cancel(review.review_id);
     }
   }
 </script>
@@ -71,9 +71,9 @@
       bind:ref={cancelButton}
       variant="secondary"
       disabled={busy}
-      onclick={() => webext.cancel()}>{m.webext_review_cancel()}</Button
+      onclick={() => webext.cancel(review.review_id)}>{m.webext_review_cancel()}</Button
     >
-    <Button variant="primary" pending={busy} onclick={() => void webext.confirm()}
+    <Button variant="primary" pending={busy} onclick={() => void webext.confirm(review.review_id)}
       >{review.update ? m.webext_review_update() : m.webext_review_add()}</Button
     >
   </div>

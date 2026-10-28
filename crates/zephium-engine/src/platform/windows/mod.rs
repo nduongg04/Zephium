@@ -56,6 +56,7 @@ mod cookie_transfer;
 pub(crate) mod extensions;
 #[cfg(feature = "agentic-browser")]
 pub(crate) mod page_glow;
+mod page_layer;
 #[cfg(feature = "agentic-browser")]
 mod semantic_action;
 #[cfg(feature = "agentic-browser")]
@@ -63,6 +64,7 @@ mod semantic_action;
 // physical Windows isolated-world qualifier promotes the support claim.
 #[allow(dead_code)]
 mod semantic_runtime;
+mod sidebar_card;
 // The bounded native capture adapter is compiled now, but the Windows host
 // keeps screenshot dispatch closed with semantic support until qualification.
 mod apps;
@@ -138,10 +140,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2, ICoreWebView2Controller, ICoreWebView2Environment, ICoreWebView2Environment10,
-    ICoreWebView2Environment5, ICoreWebView2Environment7, ICoreWebView2Environment8,
-    ICoreWebView2Profile2, ICoreWebView2Settings4, ICoreWebView2Settings7, ICoreWebView2_10,
-    ICoreWebView2_13, ICoreWebView2_14, ICoreWebView2_18, ICoreWebView2_5,
+    ICoreWebView2, ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2Controller,
+    ICoreWebView2Environment, ICoreWebView2Environment10, ICoreWebView2Environment5,
+    ICoreWebView2Environment7, ICoreWebView2Environment8, ICoreWebView2Profile2,
+    ICoreWebView2Settings4, ICoreWebView2Settings7, ICoreWebView2_10, ICoreWebView2_13,
+    ICoreWebView2_14, ICoreWebView2_18, ICoreWebView2_5,
     COREWEBVIEW2_BROWSER_PROCESS_EXIT_KIND_FAILED, COREWEBVIEW2_BROWSER_PROCESS_EXIT_KIND_NORMAL,
     COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
     COREWEBVIEW2_PDF_TOOLBAR_ITEMS_PRINT, COREWEBVIEW2_PDF_TOOLBAR_ITEMS_SAVE,
@@ -383,6 +386,7 @@ fn configure_with_credential_denied(
     // Raw content views never use host objects or web messages. Disable the
     // mechanisms in the runtime too, so a future accidental handler cannot
     // silently turn into a bridge.
+    crate::reputation::configure(&core)?;
     let settings = unsafe { core.Settings()? };
     // The PDF viewer has its own Save, Save As and Print surfaces. They do not
     // reliably pass through DownloadStarting, so Settings7 is mandatory for
@@ -1932,6 +1936,83 @@ impl Drop for AcceleratorRegistration {
     }
 }
 
+/// F10 and Alt+Space belong to the window's caption, yet WebView2 takes them
+/// before the window sees them. They reach the parent as the messages Windows
+/// itself would have produced.
+fn forward_caption_key(
+    controller: Option<&ICoreWebView2Controller>,
+    args: &ICoreWebView2AcceleratorKeyPressedEventArgs,
+    key: u32,
+    modifiers: (bool, bool, bool),
+) -> windows_core::Result<()> {
+    use crate::caption_keys::{classify, CaptionKey};
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_F10;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        PostMessageW, SC_KEYMENU, WM_SYSCOMMAND, WM_SYSKEYDOWN,
+    };
+
+    let (ctrl, shift, alt) = modifiers;
+    let (Some(controller), Some(caption_key)) = (controller, classify(key, ctrl, shift, alt))
+    else {
+        return Ok(());
+    };
+    // SAFETY: the arguments and controller are live for this callback.
+    unsafe {
+        args.SetHandled(true)?;
+        let mut lparam = 0i32;
+        args.KeyEventLParam(&mut lparam)?;
+        // Holding the key must not repeat what its first press did.
+        if lparam & (1 << 30) != 0 {
+            return Ok(());
+        }
+        let mut parent = HWND::default();
+        controller.ParentWindow(&mut parent)?;
+        match caption_key {
+            CaptionKey::Buttons => PostMessageW(
+                Some(parent),
+                WM_SYSKEYDOWN,
+                WPARAM(usize::from(VK_F10.0)),
+                LPARAM(lparam as u32 as isize),
+            ),
+            CaptionKey::SystemMenu => PostMessageW(
+                Some(parent),
+                WM_SYSCOMMAND,
+                WPARAM(SC_KEYMENU as usize),
+                LPARAM(' ' as isize),
+            ),
+        }
+    }
+}
+
+/// Lets the caption hear its keys from a WebView that is not one of the
+/// engine's own, such as the browser chrome. Lives as long as the controller.
+pub fn bridge_caption_keys(controller: &ICoreWebView2Controller) -> windows_core::Result<()> {
+    let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |controller, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+        let mut kind = COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN;
+        unsafe { args.KeyEventKind(&mut kind)? };
+        if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+            && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+        {
+            return Ok(());
+        }
+        let mut key = 0u32;
+        unsafe { args.VirtualKey(&mut key)? };
+        let down = |vk: i32| unsafe { (GetKeyState(vk) as u16 & 0x8000) != 0 };
+        let modifiers = (
+            down(VK_CONTROL.0 as i32),
+            down(VK_SHIFT.0 as i32),
+            down(VK_MENU.0 as i32),
+        );
+        forward_caption_key(controller.as_ref(), &args, key, modifiers)
+    }));
+    let mut token = Default::default();
+    unsafe { controller.add_AcceleratorKeyPressed(&handler, &mut token) }
+}
+
 pub fn install_accelerators(
     view: &wry::WebView,
     shortcuts: Arc<std::sync::RwLock<Vec<Shortcut>>>,
@@ -1981,8 +2062,9 @@ pub fn install_accelerators(
                 item: item(),
                 command,
             });
+            return Ok(());
         }
-        Ok(())
+        forward_caption_key(controller.as_ref(), &args, key, (ctrl, shift, alt))
     }));
     let mut token = Default::default();
     unsafe { controller.add_AcceleratorKeyPressed(&handler, &mut token)? };

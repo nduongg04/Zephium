@@ -379,7 +379,7 @@ favorites and folders into one aggregate; there is no separate bookmarks system.
   spaces swaps the visible item set and the theme.
 - **Item** - sidebar node. `{ id: Ulid, container, parent: Option<ItemId>,
   order, kind: Folder { name } | Tab { url, title, favicon } }`.
-  Containers/sections: `Favorites(profile)` (profile-wide grid),
+  Containers/sections: `Favorites(space)` (the space's Essentials),
   `Pinned(space)`, `Today(space)` (ephemeral tabs, auto-archivable).
 - **View** (runtime only) - a live webview bound to an item:
   `{ view: u64, item: ItemId, profile }`. Many items, few views (§7).

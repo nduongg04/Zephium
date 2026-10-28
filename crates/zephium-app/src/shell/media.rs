@@ -134,7 +134,8 @@ impl Shell {
         if self.item_in_focused_scope(id) {
             return self.operation_activate(id);
         }
-        let Some(&Placement::Space { space, .. }) = self.items.get(id).map(|item| &item.placement)
+        let Some(&(Placement::Favorites { space } | Placement::Space { space, .. })) =
+            self.items.get(id).map(|item| &item.placement)
         else {
             return operation_result(OperationOutcome::Rejected, OperationReason::InvalidScope);
         };

@@ -54,6 +54,8 @@ pub struct WebExtensionLoad {
     pub extension_id: String,
     pub root: std::path::PathBuf,
     pub permissions: Vec<String>,
+    /// Explicit original native-app grant bound to authenticated package provenance.
+    pub external_native_messaging: bool,
     pub match_patterns: Vec<String>,
     /// Set when the package changed since WebKit last ran it, so its
     /// background runs once and WebKit relearns what it listens for.
@@ -802,6 +804,21 @@ pub trait Engine {
     fn set_drop_indicator(&self, window: WindowId, preview: Option<DropPreview>) -> NativeDispatch;
     /// A transient guide in window coordinates; never changes pane geometry.
     fn set_resize_guide(&self, _window: WindowId, _zone: Option<Rect>) -> NativeDispatch {
+        NativeDispatch::Unsupported
+    }
+    /// Stacks the chrome over the content while a hidden sidebar is shown, or
+    /// back beneath it. Only the stacking changes; nothing is laid out.
+    /// `card` is where the column stands over the page, in window
+    /// coordinates, for a platform whose chrome must be cut to it.
+    /// `slide` follows the card as it slides in or out, rather than cutting
+    /// to it at once.
+    fn raise_chrome(
+        &self,
+        _window: WindowId,
+        _raised: bool,
+        _card: Rect,
+        _slide: bool,
+    ) -> NativeDispatch {
         NativeDispatch::Unsupported
     }
     /// Asks the next content layout applied to `window` to move rather than

@@ -590,6 +590,14 @@ pub struct CallbackHandle {
 }
 
 impl CallbackHandle {
+    /// A background producer may stop preparing work after shutdown seals ingress.
+    /// This observation does not reserve admission; dispatch remains authoritative.
+    pub fn is_accepting_commands(&self) -> bool {
+        self.queue
+            .upgrade()
+            .is_some_and(|inner| (CommandQueue { inner }).is_accepting_commands())
+    }
+
     /// Sticky retained state is polled after every Shell command. A full queue
     /// already owns that progress; a sealed queue owns the shutdown barrier,
     /// which waits on the original resource notification epoch instead. Only

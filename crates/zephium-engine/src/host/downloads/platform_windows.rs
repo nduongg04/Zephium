@@ -63,6 +63,7 @@ pub(super) struct Source {
     parent: HWND,
     root: HWND,
     initial_open: bool,
+    ask_destination: bool,
 }
 impl Source {
     pub(super) fn live(&self) -> bool {
@@ -369,10 +370,11 @@ impl Downloads {
         request: (
             &ICoreWebView2Controller,
             &ICoreWebView2DownloadStartingEventArgs,
+            bool,
         ),
         mut initial: Option<InitialDownload>,
     ) {
-        let (controller, args) = request;
+        let (controller, args, ask_destination) = request;
         let initial_open = initial.is_some();
         if self.stopping.get()
             || self.retired.borrow().contains(&partition.profile())
@@ -404,6 +406,7 @@ impl Downloads {
             parent,
             root: unsafe { GetAncestor(parent, GA_ROOT) },
             initial_open,
+            ask_destination,
         };
         if !source.key() {
             return;
@@ -606,10 +609,11 @@ impl Downloads {
                     source.root,
                     transfer.record.filename.clone(),
                     transfer.record.source.clone(),
+                    source.ask_destination,
                 )
             })
         });
-        let Some((true, window, filename, source)) = context else {
+        let Some((true, window, filename, source, ask_destination)) = context else {
             self.cancel(id, None);
             return;
         };
@@ -620,7 +624,8 @@ impl Downloads {
             .or_else(dirs::download_dir);
         // Admission pins the foreground document; WebView2's automatic-download
         // permission remains denied, so a page cannot authorize a download flood.
-        if !preferences.ask_destination
+        if !ask_destination
+            && !preferences.ask_destination
             && (preferences.directory.is_none() || preferences.directory_identity.is_some())
         {
             let Some(directory) = directory else {

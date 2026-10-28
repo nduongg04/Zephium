@@ -893,27 +893,38 @@ fn export_text(
             BookmarkReply::Nodes(nodes) => Some(zephium_core::export::bookmarks_html(&nodes)),
             _ => None,
         },
-        ExportKind::History => {
-            let mut text = String::from(HISTORY_CSV_HEADER);
-            let (mut before, mut exported) = (None, 0);
-            while exported < MAX_EXPORT_VISITS {
-                let mut visits = store.history_page(profile, "", None, before, EXPORT_PAGE);
-                // The store answers a call it could not serve in time with no
-                // visits, which a real end also is. Ask once more before
-                // believing it, so a stall does not end the file early.
-                if visits.is_empty() {
-                    visits = store.history_page(profile, "", None, before, EXPORT_PAGE);
-                }
-                zephium_core::export::push_history_rows(&visits, &mut text);
-                exported += visits.len();
-                match visits.last() {
-                    Some(last) if visits.len() == EXPORT_PAGE as usize => before = Some(last.id),
-                    _ => break,
-                }
-            }
-            Some(text)
+        ExportKind::History => history_export(|before| {
+            store.history_page_checked(profile, "", None, before, EXPORT_PAGE)
+        }),
+    }
+}
+
+fn history_export(
+    mut page: impl FnMut(
+        Option<i64>,
+    ) -> Result<
+        Vec<zephium_core::ports::store::HistoryVisit>,
+        zephium_core::ports::store::HistoryPageError,
+    >,
+) -> Option<String> {
+    let mut text = String::from(HISTORY_CSV_HEADER);
+    let (mut before, mut exported) = (None, 0);
+    while exported < MAX_EXPORT_VISITS {
+        let visits = match page(before) {
+            Err(
+                zephium_core::ports::store::HistoryPageError::TimedOut
+                | zephium_core::ports::store::HistoryPageError::NotAdmitted,
+            ) => page(before).ok()?,
+            result => result.ok()?,
+        };
+        zephium_core::export::push_history_rows(&visits, &mut text);
+        exported += visits.len();
+        match visits.last() {
+            Some(last) if visits.len() == EXPORT_PAGE as usize => before = Some(last.id),
+            _ => return Some(text),
         }
     }
+    Some(text)
 }
 
 pub(crate) fn run(store: SharedStore, queue: StoreReadQueue, callback: CallbackHandle) {
@@ -976,13 +987,18 @@ fn run_with(
                         removed: None,
                     }
                 }
-                zephium_ipc::HistoryCall::Forget { urls } => StoreReadResult::HistorySurface {
-                    token,
-                    profile,
-                    visits: Vec::new(),
-                    next: None,
-                    removed: Some(store.forget_history_urls(profile, &urls)),
-                },
+                zephium_ipc::HistoryCall::Forget { urls } => {
+                    match store.forget_history_urls_checked(profile, &urls) {
+                        Some(removed) => StoreReadResult::HistorySurface {
+                            token,
+                            profile,
+                            visits: Vec::new(),
+                            next: None,
+                            removed: Some(removed),
+                        },
+                        None => StoreReadResult::HistorySurfaceFailed { token, profile },
+                    }
+                }
                 call @ (zephium_ipc::HistoryCall::Clear { .. }
                 | zephium_ipc::HistoryCall::ClearSince { .. }) => {
                     let since = match call {
@@ -1106,6 +1122,123 @@ fn run_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_export_refuses_first_or_middle_page_errors_and_accepts_real_eof() {
+        use zephium_core::ports::store::{HistoryPageError, HistoryVisit};
+        for error in [
+            HistoryPageError::TimedOut,
+            HistoryPageError::NotAdmitted,
+            HistoryPageError::Failed,
+            HistoryPageError::Invalid,
+        ] {
+            for fail_after in [0, 1] {
+                let mut calls = 0;
+                assert!(history_export(|_| {
+                    calls += 1;
+                    if calls > fail_after {
+                        return Err(error);
+                    }
+                    Ok((1..=EXPORT_PAGE)
+                        .rev()
+                        .map(|id| HistoryVisit {
+                            id: i64::from(id),
+                            url: format!("https://site{id}.example/"),
+                            title: "Kept".into(),
+                            visited_at: 1,
+                        })
+                        .collect())
+                })
+                .is_none());
+                assert_eq!(
+                    calls,
+                    fail_after
+                        + if matches!(
+                            error,
+                            HistoryPageError::TimedOut | HistoryPageError::NotAdmitted
+                        ) {
+                            2
+                        } else {
+                            1
+                        }
+                );
+            }
+        }
+        assert_eq!(
+            history_export(|_| Ok(Vec::new())),
+            Some(HISTORY_CSV_HEADER.into())
+        );
+    }
+
+    #[test]
+    fn history_export_retries_only_the_failed_page_once_without_losing_or_duplicating_rows() {
+        use zephium_core::ports::store::{HistoryPageError, HistoryVisit};
+        for error in [HistoryPageError::TimedOut, HistoryPageError::NotAdmitted] {
+            for failed_page in [None, Some(2)] {
+                let mut retried = false;
+                let mut cursors = Vec::new();
+                let text = history_export(|before| {
+                    cursors.push(before);
+                    if before == failed_page && !retried {
+                        retried = true;
+                        return Err(error);
+                    }
+                    Ok(match before {
+                        None => (2..=EXPORT_PAGE + 1)
+                            .rev()
+                            .map(|id| HistoryVisit {
+                                id: i64::from(id),
+                                url: format!("https://site{id}.example/"),
+                                title: "Kept".into(),
+                                visited_at: 1,
+                            })
+                            .collect(),
+                        Some(2) => vec![HistoryVisit {
+                            id: 1,
+                            url: "https://last.example/".into(),
+                            title: "Last".into(),
+                            visited_at: 1,
+                        }],
+                        _ => panic!("unexpected cursor"),
+                    })
+                })
+                .expect("one transient page failure is retried");
+                assert_eq!(text.lines().count(), EXPORT_PAGE as usize + 2);
+                assert_eq!(text.matches("https://last.example/").count(), 1);
+                assert_eq!(
+                    cursors
+                        .iter()
+                        .filter(|cursor| **cursor == failed_page)
+                        .count(),
+                    2
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_failed_checked_history_forget_delivers_failure_instead_of_removed_zero() {
+        let store: SharedStore = Arc::new(zephium_store::SqliteStore::in_memory().unwrap());
+        let profile = ProfileId::from(777);
+        let queue = StoreReadQueue::new();
+        assert!(queue.request_history_call(
+            43,
+            profile,
+            zephium_ipc::HistoryCall::Forget {
+                urls: vec!["https://example.test/".into()]
+            }
+        ));
+        let mut result = None;
+        let stop = queue.clone();
+        run_with(store, queue, |reply| {
+            result = Some(reply);
+            stop.stop();
+            false
+        });
+        assert!(
+            matches!(result, Some(StoreReadResult::HistorySurfaceFailed { token: 43, profile: owner }) if owner == profile)
+        );
+    }
 
     #[test]
     fn a_failed_checked_history_clear_delivers_failure_instead_of_removed_zero() {

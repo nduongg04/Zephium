@@ -274,7 +274,7 @@ impl Shell {
         for (placement, section) in [
             (
                 Placement::Favorites {
-                    profile: profile.id,
+                    space: active_space.id,
                 },
                 SidebarSectionView::Favorites,
             ),

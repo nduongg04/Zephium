@@ -20,6 +20,8 @@ afterEach(() => vi.clearAllMocks());
 
 function extension(overrides: Partial<WebExtensionView> = {}): WebExtensionView {
   return {
+    profile_id: "profile-a",
+    install_id: "install-a",
     id: "eimadpbcbfnmbkopoojfekhnkhdbieeh",
     name: "Dark Reader",
     version: "4.9.130",
@@ -51,7 +53,9 @@ test("a failed extension offers a retry", async () => {
   });
   await expect.element(page.getByText(/Couldn't start: The background crashed\./)).toBeVisible();
   await userEvent.click(page.getByRole("button", { name: "Retry" }));
-  expect(actions.retry).toHaveBeenCalledWith("eimadpbcbfnmbkopoojfekhnkhdbieeh");
+  expect(actions.retry).toHaveBeenCalledWith(
+    expect.objectContaining({ profile_id: "profile-a", install_id: "install-a" }),
+  );
 });
 
 test("an update waiting for approval can be reviewed", async () => {

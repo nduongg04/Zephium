@@ -9,6 +9,10 @@ pub use agent_context_port::{
     any(target_os = "macos", target_os = "windows")
 ))]
 pub use agent_context_port::{work_browser_monotonic_deadline, work_browser_monotonic_now};
+#[cfg(any(target_os = "windows", test))]
+mod caption_keys;
+#[cfg(any(target_os = "windows", test))]
+mod card_geometry;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 mod data_kinds;
 #[cfg(all(target_os = "macos", feature = "native-agentic-work-resource-probe"))]
@@ -25,12 +29,23 @@ mod layout_queue;
 mod motion_curve;
 mod navigation_epoch;
 mod network;
+#[cfg(any(target_os = "windows", test))]
+mod reputation;
+#[cfg(target_os = "windows")]
+pub use reputation::{
+    configure as configure_windows_reputation_checking,
+    initialize as initialize_windows_reputation_checking, managed as windows_reputation_managed,
+    on_managed as on_windows_reputation_managed,
+};
+
 #[cfg(feature = "agentic-browser")]
 pub mod page_reader;
 mod pane_geometry;
 mod platform;
 #[cfg(target_os = "windows")]
-pub use platform::windows::{forget_window_caption_offset, set_window_caption_offset};
+pub use platform::windows::{
+    bridge_caption_keys, forget_window_caption_offset, set_window_caption_offset,
+};
 #[cfg(all(feature = "agentic-browser", any(target_os = "windows", test)))]
 mod work_site_session;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -3072,6 +3087,36 @@ impl Engine for WebviewEngine {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (window, zone);
+            NativeDispatch::Unsupported
+        }
+    }
+
+    fn raise_chrome(
+        &self,
+        window: WindowId,
+        raised: bool,
+        card: Rect,
+        slide: bool,
+    ) -> NativeDispatch {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            let queued_retirement = self.retirement.clone();
+            let queued_delivery = self.event_delivery.clone();
+            let queued_fatal = self.fatal_security_failure.clone();
+            NativeDispatch::from_scheduled(self.run(move || {
+                if !host::try_with(move |host| host.raise_chrome(window, raised, card, slide)) {
+                    fail_native_host_admission(
+                        &queued_delivery,
+                        &queued_retirement,
+                        &queued_fatal,
+                        "chrome stacking was not admitted by the engine host",
+                    );
+                }
+            }))
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            let _ = (window, raised, card, slide);
             NativeDispatch::Unsupported
         }
     }

@@ -199,10 +199,8 @@ impl Shell {
             native_erasure_verified,
         } in pending_deletions
         {
-            let phase = if native_erasure_verified {
-                ProfileDeletionPhase::FinalizeReady
-            } else {
-                ProfileDeletionPhase::NativeReady
+            let phase = ProfileDeletionPhase::NotesReady {
+                native_erasure_verified,
             };
             self.profile_deletion.states.insert(
                 profile,

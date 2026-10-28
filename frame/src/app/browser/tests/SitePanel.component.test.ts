@@ -10,6 +10,12 @@ import { tabs } from "$domain/tabs";
 import Shell from "../Shell.svelte";
 
 vi.mock("../WorkWorkspace.svelte", async () => await import("./StageStub.svelte"));
+// The new tab's own figures read the blocker's stats; only the panel's
+// requests are under test here.
+vi.mock(
+  "$features/newtab/components/NewTab.svelte",
+  async () => await import("./StageStub.svelte"),
+);
 
 const native = vi.hoisted(() => ({
   list: vi.fn<(origin?: string) => Promise<SitePermissionsView | null>>(),

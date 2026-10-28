@@ -347,21 +347,19 @@ impl Items {
         effects
     }
 
-    /// Removes items whose ownership is directly proven by a profile's
-    /// favorites placement or by the exact `Spaces` aggregate removal proof.
-    /// A space absent from that proof is never inferred to belong to the
-    /// profile. Returns at most `MAX_SESSION_ITEMS` native close effects.
+    /// Removes items whose ownership is directly proven by the exact `Spaces`
+    /// aggregate removal proof. A space absent from that proof is never
+    /// inferred to belong to the profile. Returns at most `MAX_SESSION_ITEMS`
+    /// native close effects.
     pub fn remove_for_profile(&mut self, spaces: &RemovedProfileSpaces) -> Vec<Effect> {
         let removed_spaces: HashSet<_> = spaces.ids().iter().copied().collect();
         let owned: HashSet<ItemId> = self
             .items
             .iter()
             .filter_map(|(id, item)| {
-                let owned = match item.placement {
-                    Placement::Favorites { profile } => profile == spaces.profile(),
-                    Placement::Space { space, .. } => removed_spaces.contains(&space),
-                };
-                owned.then_some(*id)
+                let (Placement::Favorites { space } | Placement::Space { space, .. }) =
+                    item.placement;
+                removed_spaces.contains(&space).then_some(*id)
             })
             .collect();
         if owned.is_empty() {
@@ -870,7 +868,12 @@ mod tests {
         let target_folder = id(5);
         let structurally_foreign_child = id(6);
         let mut items = Items::default();
-        assert!(items.insert_tab(target_favorite, Placement::Favorites { profile: target },));
+        assert!(items.insert_tab(
+            target_favorite,
+            Placement::Favorites {
+                space: target_space
+            },
+        ));
         assert!(items.insert_tab(
             target_tab,
             Placement::Space {
@@ -895,12 +898,14 @@ mod tests {
         assert!(items.insert(Item {
             id: target_folder,
             parent: None,
-            placement: Placement::Favorites { profile: target },
+            placement: Placement::Favorites {
+                space: target_space,
+            },
             kind: ItemKind::Folder { name: "F".into() },
         }));
         assert!(items.insert_tab(
             structurally_foreign_child,
-            Placement::Favorites { profile: other },
+            Placement::Favorites { space: other_space },
         ));
 
         for tab in [target_favorite, target_tab, other_tab, unknown_tab] {
@@ -911,7 +916,7 @@ mod tests {
         // not ancestry, must decide whether the child is deleted.
         items
             .roots
-            .get_mut(&Placement::Favorites { profile: other })
+            .get_mut(&Placement::Favorites { space: other_space })
             .unwrap()
             .retain(|id| *id != structurally_foreign_child);
         items
@@ -944,7 +949,7 @@ mod tests {
         }
         assert_eq!(items.get(structurally_foreign_child).unwrap().parent, None);
         assert_eq!(
-            items.roots(Placement::Favorites { profile: other }),
+            items.roots(Placement::Favorites { space: other_space }),
             &[structurally_foreign_child]
         );
     }
@@ -1114,7 +1119,7 @@ mod tests {
     fn an_unloaded_tab_knows_its_page_without_a_view() {
         let mut items = Items::default();
         let kept = Placement::Favorites {
-            profile: ProfileId::from(1),
+            space: SpaceId::from(1),
         };
         let url = Url::parse("https://app.slack.com/client").unwrap();
         assert!(items.insert_unloaded_tab(id(1), kept, url, "Slack\u{202e}"));

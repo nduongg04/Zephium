@@ -83,7 +83,7 @@
           <span class="status"
             >{m.webext_state_failed()}{#if extension.error}: {extension.error}{/if}</span
           >
-          <button type="button" class="inline" onclick={() => void webext.retry(extension.id)}
+          <button type="button" class="inline" onclick={() => void webext.retry(extension)}
             >{m.webext_retry()}</button
           >
         </span>

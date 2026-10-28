@@ -75,6 +75,8 @@ mod data_export;
 mod default_browser;
 mod diagnostic_report;
 mod diagnostics;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod edge_reach;
 mod external_links;
 #[cfg(feature = "work-product")]
 mod favicon_probe;
@@ -126,6 +128,7 @@ mod voice;
 mod webext;
 #[cfg(all(target_os = "windows", feature = "webext-qa"))]
 mod webext_qa;
+mod windows_privacy;
 #[cfg(feature = "work-product")]
 mod work_activity;
 #[cfg(feature = "work-integration-qa")]
@@ -643,11 +646,11 @@ fn on_main_window_mapped(window: &WebviewWindow) {
     linux_global_shortcuts::main_window_mapped(window);
 }
 
+/// DWM can discard the backdrop installed while the window was hidden.
+/// Restore it at the first reveal, not at some later focus event, and use
+/// the person's saved appearance rather than the operating-system default.
 #[cfg(target_os = "windows")]
-fn on_main_window_mapped(window: &WebviewWindow) {
-    // DWM can discard the backdrop installed while the window was hidden.
-    // Restore it at the first reveal, not at some later focus event, and use
-    // the person's saved appearance rather than the operating-system default.
+pub(crate) fn restore_window_material(window: &WebviewWindow) -> bool {
     let appearance = APP_STORE
         .get()
         .and_then(|store| store.app_setting("appearance"))
@@ -656,7 +659,12 @@ fn on_main_window_mapped(window: &WebviewWindow) {
         resolved_native_theme(window, &appearance),
         tauri::Theme::Dark
     );
-    if !platform::imp::apply_material(window, dark) {
+    platform::imp::apply_material(window, dark)
+}
+
+#[cfg(target_os = "windows")]
+fn on_main_window_mapped(window: &WebviewWindow) {
+    if !restore_window_material(window) {
         diagnostic!("material: main-window backdrop could not be restored after initial reveal");
     }
 }
@@ -1748,6 +1756,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             webext::web_extension_cancel,
             webext::web_extension_list,
             webext::web_extension_set_enabled,
+            webext::web_extension_retry,
             webext::web_extension_uninstall,
             webext::web_extension_answer_access,
             webext::web_extension_set_access,
@@ -1802,6 +1811,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             launcher_open_accessibility,
             setting_get,
             setting_set,
+            windows_privacy::windows_diagnostics_settings,
+            windows_privacy::windows_reputation_managed,
             ui_info,
             ui_ready,
             menu_popup,
@@ -1818,6 +1829,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             launcher_search,
             launcher_run,
             sidebar_set_width,
+            sidebar_set_hidden,
+            sidebar_peek,
             sidebar_resize,
             sidebar_resize_guide,
             tab_drag_over,
@@ -2076,9 +2089,7 @@ pub(crate) fn emit_media_changed(app: &tauri::AppHandle, profile: &str, id: &str
         id: id.to_owned(),
         revision: revision.to_owned(),
     };
-    for label in [MAIN_LABEL, overlay::PANEL_LABEL] {
-        emit_to_privileged(app, label, "zephium:resource-changed", &event);
-    }
+    emit_to_privileged(app, MAIN_LABEL, "zephium:resource-changed", &event);
 }
 
 fn emit_to_privileged<T: Serialize>(app: &tauri::AppHandle, label: &str, event: &str, payload: &T) {
@@ -3627,6 +3638,21 @@ fn accepted_ui_operation() -> zephium_ipc::OperationAdmission {
     }
 }
 
+/// F11. On Windows the window's own caption steps aside while the window fills
+/// the screen, and only while it truly does.
+fn toggle_window_fullscreen(window: &WebviewWindow) {
+    let enter = !window.is_fullscreen().unwrap_or(false);
+    #[cfg(target_os = "windows")]
+    if enter {
+        platform::imp::set_caption_window_fullscreen(window, true);
+    }
+    let changed = window.set_fullscreen(enter).is_ok();
+    #[cfg(target_os = "windows")]
+    platform::imp::set_caption_window_fullscreen(window, enter == changed);
+    #[cfg(not(target_os = "windows"))]
+    let _ = changed;
+}
+
 fn execute_command(app: &tauri::AppHandle, id: &str) -> zephium_ipc::OperationAdmission {
     execute_command_or(app, id, || {
         app.try_state::<Handle>()
@@ -3671,9 +3697,7 @@ fn execute_command_or(
         };
         return if !content_fullscreen::held()
             && app
-                .run_on_main_thread(move || {
-                    let _ = window.set_fullscreen(!window.is_fullscreen().unwrap_or(false));
-                })
+                .run_on_main_thread(move || toggle_window_fullscreen(&window))
                 .is_ok()
         {
             accepted_ui_operation()
@@ -5429,6 +5453,41 @@ fn sidebar_set_width(
     shell.dispatch(Command::SetSidebarWidth(width, animate));
 }
 
+/// Puts the sidebar away, the page taking the window, or brings it back.
+#[tauri::command]
+#[specta::specta]
+fn sidebar_set_hidden(caller: WebviewWindow, shell: State<'_, Handle>, hidden: bool) {
+    if !authorize(&caller, CallerPolicy::Main, "sidebar_set_hidden") {
+        return;
+    }
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    platform::imp::sidebar_hidden(&caller, hidden);
+    shell.dispatch(Command::SetSidebarHidden(hidden));
+}
+
+/// Brings a hidden sidebar over the page while the pointer wants it, or puts
+/// it back beneath. The window controls show with the card, and leave the
+/// moment it starts to go rather than once it has. `slide` has a platform that
+/// cuts the chrome to the card follow it in and out.
+#[tauri::command]
+#[specta::specta]
+fn sidebar_peek(
+    caller: WebviewWindow,
+    shell: State<'_, Handle>,
+    peek: bool,
+    lights: bool,
+    slide: bool,
+) {
+    if !authorize(&caller, CallerPolicy::Main, "sidebar_peek") {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    platform::imp::sidebar_card_lights(&caller, peek && lights);
+    #[cfg(not(target_os = "macos"))]
+    let _ = lights;
+    shell.dispatch(Command::PeekSidebar { peek, slide });
+}
+
 #[tauri::command]
 #[specta::specta]
 async fn sidebar_resize(caller: WebviewWindow, width: f64, enabled: bool, revision: f64) -> bool {
@@ -6115,12 +6174,7 @@ fn build_tab_menu(
     let close = item(7, "Close Tab", true)?;
     let others = item(8, "Close Other Tabs", context.others)?;
     let below = item(9, "Close Tabs Below", context.below)?;
-    // Favorites belong to every space, so only a space's own tab can move.
-    let move_to = if context.essential {
-        None
-    } else {
-        spaces::tab_menu_section(handle, &format!("tabmenu.{}", spaces::TAB_MENU_MOVE))?
-    };
+    let move_to = spaces::tab_menu_section(handle, &format!("tabmenu.{}", spaces::TAB_MENU_MOVE))?;
     let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
         &reload,
         &duplicate,
@@ -6583,6 +6637,8 @@ pub fn run() {
                 {
                     let _ = store.set_app_setting(key.into(), value);
                 }
+                #[cfg(target_os = "windows")]
+                windows_privacy::initialize(app.handle(), store.clone());
                 menu_text::set_language(store.app_setting("ui.language").as_deref());
                 updates::schedule_native_checks(app.handle());
                 work_models::install(app.handle());
@@ -6612,6 +6668,10 @@ pub fn run() {
                 tauri::Url::parse(PRIVILEGED_BOOTSTRAP_URL)
                     .map_err(|error| std::io::Error::other(error.to_string()))?,
             );
+                #[cfg(target_os = "macos")]
+                if let Some(position) = main_config.traffic_light_position.as_mut() {
+                    position.y += platform::imp::window_controls_lift();
+                }
                 let main_builder = tauri::WebviewWindowBuilder::from_config(app, &main_config)?
                 // Do not expose an interactive privileged renderer until the
                 // platform deny handlers below have replaced WebKit/WebView2
@@ -6835,9 +6895,7 @@ pub fn run() {
             let downloads_app = handle.clone();
             if !engine.initialize_downloads(store.clone(), move |profile| {
                 let event = DownloadsChanged { profile: profile.to_string() };
-                for label in [MAIN_LABEL, overlay::PANEL_LABEL] {
-                    emit_to_privileged(&downloads_app, label, "zephium:downloads-changed", &event);
-                }
+                emit_to_privileged(&downloads_app, MAIN_LABEL, "zephium:downloads-changed", &event);
             }) { return Err(std::io::Error::other("download service initialization was not admitted").into()); }
             let startup_engine = app.try_state::<StartupEngine>().ok_or_else(|| {
                 std::io::Error::other("startup engine cleanup owner is unavailable")
@@ -7467,6 +7525,7 @@ pub fn run() {
                     .into());
                 }
                 material::install(&panel_window, true);
+                overlay::fit_to_shapes(&panel_window);
             }
             #[cfg(target_os = "windows")]
             {
