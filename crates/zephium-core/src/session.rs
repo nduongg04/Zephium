@@ -292,6 +292,9 @@ pub fn restore(state: SessionState) -> Restored {
         let placement_ok = match i.placement {
             Placement::Favorites { profile } => profiles.get(profile).is_some(),
             Placement::Space { space, .. } => spaces.get(space).is_some(),
+            // A Little window's page is never saved; one in a session came
+            // from somewhere else.
+            Placement::Little { .. } => false,
         };
         if !placement_ok {
             continue;
@@ -428,6 +431,7 @@ fn item_in_space_scope(items: &Items, spaces: &Spaces, id: ItemId, space: SpaceI
         Placement::Space {
             space: item_space, ..
         } => item_space == space,
+        Placement::Little { .. } => false,
     }
 }
 

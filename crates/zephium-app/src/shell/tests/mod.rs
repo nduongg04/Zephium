@@ -342,6 +342,7 @@ pub(crate) struct FakeEngine {
     fills_window_for_fullscreen: std::sync::atomic::AtomicBool,
     fullscreen_exits: Mutex<Vec<ItemId>>,
     layout_regions: Mutex<Vec<Option<Rect>>>,
+    hosts_little_windows: std::sync::atomic::AtomicBool,
 }
 
 impl FakeEngine {
@@ -720,6 +721,14 @@ impl Engine for FakeEngine {
         preview: Option<zephium_core::ports::engine::DropPreview>,
     ) -> NativeDispatch {
         self.previews.lock().unwrap().push(preview);
+        self.native_admission()
+    }
+    fn hosts_little_windows(&self) -> bool {
+        self.hosts_little_windows
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+    fn release_window(&self, window: WindowId) -> NativeDispatch {
+        self.log(format!("release@{window}"));
         self.native_admission()
     }
     fn hint_stage_motion(
@@ -1737,6 +1746,10 @@ fn apply_projection(view: &mut ItemsState, p: Projection) {
         Projection::OperationProcessed(_) => {}
         Projection::Profiles(_) => {}
         Projection::OpenNote { .. } => {}
+        Projection::LittleOpened(_)
+        | Projection::Little(_)
+        | Projection::LittleClosed(_)
+        | Projection::ExternalTabsOpened => {}
     }
 }
 
@@ -2041,6 +2054,7 @@ mod extension_browser_surface;
 mod favicons;
 mod fullscreen;
 mod history;
+mod little;
 mod lookup;
 #[path = "navigation.rs"]
 mod navigation_tests;

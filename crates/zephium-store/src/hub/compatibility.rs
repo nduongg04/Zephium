@@ -78,6 +78,11 @@ impl Hub {
                     Placement::Space { space, section } => {
                         (Some(space.to_string()), section_to_str(section))
                     }
+                    Placement::Little { .. } => {
+                        return Err(invalid_data(
+                            "legacy session writer cannot encode a Little window page",
+                        ));
+                    }
                 };
                 let (kind, name, url, title, zoom) = match &item.kind {
                     PersistedKind::Folder { name } => {
@@ -553,6 +558,8 @@ fn owns_placement(profile: ProfileId, s: &SessionState, placement: Placement) ->
             .spaces
             .iter()
             .any(|x| x.id == space && x.profile == profile),
+        // Never saved: a Little window's page belongs to no session.
+        Placement::Little { .. } => false,
     }
 }
 

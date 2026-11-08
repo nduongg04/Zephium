@@ -216,6 +216,9 @@ impl Shell {
                 profile: item_profile,
             } => item_profile != profile,
             Placement::Space { space, .. } => !removed_spaces.contains(&space),
+            Placement::Little {
+                profile: item_profile,
+            } => item_profile != profile,
         });
 
         (session::canonicalize(filtered.clone()) == filtered).then_some(filtered)

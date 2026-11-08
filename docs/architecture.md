@@ -158,6 +158,22 @@ own chrome presence, stage, mode and split tree, all projecting the one
 authoritative state. Window kinds: `Main` (full chrome), `App` (site-as-app,
 minimal/no chrome), `Little` (ephemeral Arc-style link window).
 
+**Little windows (macOS).** With `tabs.external-position = little`, a link
+from another app opens in its own small window. `window.newLittle` opens the
+launcher in Little mode: an address chosen there opens a window, and no window
+exists until then. `url.focus` in a Little window opens the launcher on that
+page's address, and an address chosen replaces the page. Both offer only sites:
+an open tab's row loads its address and leaves the tab in place, and blank tabs,
+commands, notes, destinations and task capture are absent. A private session in
+front keeps the normal launcher rows. The page is `Placement::Little`: out of the sidebar, never saved,
+kept awake while its window is open. Each window is `little-<id>` with its own
+toolbar (`frame/little.html`); the engine moves the page's stage into that
+window (`attach_window`) and back for "Open in Zephium" (`release_window`), so
+the live page survives the move. The toolbar passes the same presentation
+check as the sidebar before the page shows. Menu page commands (`tab.close`,
+`nav.reload`, back, forward) act on the Little page while its window is key.
+Windows has no Little windows: links open as tabs and the command opens a tab.
+
 **Overlays.** DOM cannot render over a content webview, so anything that
 visually crosses the chrome/content boundary is its own surface. Preference
 order: native menu > overlay panel > DOM.
