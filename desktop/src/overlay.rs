@@ -682,6 +682,20 @@ fn animated_shapes() -> bool {
     }
 }
 
+/// Widens the hidden window around freshly installed shapes. The page first
+/// measures it when it loads, and a width settled later would move the shapes
+/// it had already laid out, gliding the glass in from the corner on the first
+/// arrival.
+#[cfg(target_os = "macos")]
+pub fn fit_to_shapes(window: &WebviewWindow) {
+    if animated_shapes() {
+        let _ = window.set_size(LogicalSize::new(
+            geometry::WIDTH + 2.0 * geometry::SHAPE_INSET,
+            geometry::INITIAL_HEIGHT,
+        ));
+    }
+}
+
 fn destination(tool: ToolKind) -> &'static str {
     match tool {
         ToolKind::Notes => "browser.notes",
