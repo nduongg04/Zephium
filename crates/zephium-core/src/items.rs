@@ -309,7 +309,9 @@ impl Items {
             .iter()
             .filter_map(|(id, item)| {
                 let owned = match item.placement {
-                    Placement::Favorites { profile } => profile == spaces.profile(),
+                    Placement::Favorites { profile } | Placement::Little { profile } => {
+                        profile == spaces.profile()
+                    }
                     Placement::Space { space, .. } => removed_spaces.contains(&space),
                 };
                 owned.then_some(*id)

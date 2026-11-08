@@ -15,7 +15,7 @@ impl Shell {
 
     pub(super) fn profile_of_item(&self, id: ItemId) -> Option<ProfileId> {
         match self.items.get(id)?.placement {
-            Placement::Favorites { profile } => Some(profile),
+            Placement::Favorites { profile } | Placement::Little { profile } => Some(profile),
             Placement::Space { space, .. } => self.spaces.get(space).map(|s| s.profile),
         }
     }
@@ -44,6 +44,8 @@ impl Shell {
             Placement::Space {
                 space: item_space, ..
             } => item_space == space,
+            // A Little window's page answers only to that window.
+            Placement::Little { .. } => false,
         }
     }
 

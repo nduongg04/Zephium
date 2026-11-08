@@ -120,6 +120,7 @@ impl crate::Shell {
                                 .spaces
                                 .get(space)
                                 .is_some_and(|space| space.profile == profile),
+                            zephium_core::item::Placement::Little { .. } => false,
                         }
                 }),
                 _ => false,

@@ -111,6 +111,13 @@ pub const REGISTRY: &[CommandSpec] = &[
         Keys::same("CmdOrCtrl+Shift+N"),
         Group::File,
     ),
+    // Little windows are macOS only; elsewhere the command opens a new tab.
+    command(
+        "window.newLittle",
+        "New Little Window",
+        mac_only("CmdOrCtrl+Alt+Shift+N"),
+        Group::File,
+    ),
     command(
         "window.closePrivate",
         "Close Private Window",

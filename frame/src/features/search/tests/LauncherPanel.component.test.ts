@@ -64,6 +64,7 @@ const context: PanelState = {
   corner_radius: 20,
   seed: null,
   seed_tab: null,
+  little: false,
 };
 const destinations = [
   { kind: "tasks" as const, label: "Tasks", icon: CheckListIcon },
@@ -115,6 +116,30 @@ test("Enter before any answer arrives runs once, against that exact request", as
     results: [search("rust"), search("rust book")],
   });
   expect(native.run).toHaveBeenCalledTimes(1);
+});
+
+test("opened for a Little window, the field says where the address goes", async () => {
+  const screen = await render(LauncherPanel, {
+    props: { context: { ...context, little: true }, destinations },
+  });
+  await expect
+    .element(screen.getByRole("combobox", { name: "Open in a little window" }))
+    .toBeVisible();
+});
+
+test("opened for a Little window, it offers sites and no app actions", async () => {
+  const screen = await render(LauncherPanel, {
+    props: {
+      context: { ...context, little: true },
+      destinations,
+      onCapture: async (text: string) => text,
+    },
+  });
+  await expect.element(screen.getByRole("button", { name: "Tasks" })).not.toBeInTheDocument();
+  await screen.getByRole("combobox").fill("tasks");
+  await reply("tasks", [search("tasks")]);
+  await expect.element(screen.getByRole("option", { name: /tasks/iu }).first()).toBeVisible();
+  await expect.poll(() => screen.getByRole("option").elements().length).toBe(1);
 });
 
 test("an obsolete answer cannot put its rows back on screen", async () => {
@@ -384,6 +409,52 @@ test("a launcher reopened a moment later resumes, and a fresh session asks again
   await expect.element(screen.getByRole("combobox")).toHaveValue("rust");
   await vi.waitFor(() => expect(native.search.mock.calls.length).toBeGreaterThan(calls));
   expect(native.search.mock.calls.at(-1)![0]).toBe("rust");
+});
+
+test("a reopened launcher keeps its home list on the frame it appears", async () => {
+  const tab: SearchResult = {
+    kind: "tab",
+    title: "Rust Book",
+    detail: "doc.rust-lang.org",
+    icon: null,
+    action: { type: "ActivateTab", id: "tab-1" },
+  };
+  const screen = await render(LauncherPanel, { props: { context, destinations } });
+  await reply("", [tab]);
+  await expect.element(screen.getByRole("option", { name: /Rust Book/u })).toBeVisible();
+  await vi.waitFor(() => expect(native.layout).toHaveBeenCalled());
+  const home = native.layout.mock.calls.at(-1)![0].height;
+  await screen.rerender({ context: { ...context, revision: "0000000000000002", visible: false } });
+  const calls = native.search.mock.calls.length;
+  await screen.rerender({
+    context: { ...context, revision: "0000000000000003", session_id: "0000000000000003" },
+  });
+  // The new presentation's request has gone out and nothing has answered yet.
+  await vi.waitFor(() => expect(native.search.mock.calls.length).toBeGreaterThan(calls));
+  expect(screen.container.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(native.layout.mock.calls.at(-1)![0].height).toBe(home);
+});
+
+test("editing an address asks for that address and never for an empty field first", async () => {
+  const screen = await render(LauncherPanel, {
+    props: { context: { ...context, visible: false }, destinations },
+  });
+  // Let the page start listening, so the next presentation binds a controller
+  // directly rather than waiting for one at mount.
+  await new Promise((done) => setTimeout(done, 50));
+  await screen.rerender({
+    context: {
+      ...context,
+      revision: "0000000000000002",
+      session_id: "0000000000000002",
+      seed: "https://example.com/",
+      seed_tab: "tab-1",
+    },
+  });
+  await vi.waitFor(() => expect(native.search).toHaveBeenCalled());
+  await new Promise((done) => setTimeout(done, 100));
+  expect(native.search.mock.calls.map(([query]) => query)).toEqual(["https://example.com/"]);
+  await expect.element(screen.getByRole("combobox")).toHaveValue("https://example.com/");
 });
 
 test("sleeping past the resume deadline clears a query even when its timer never fired", async () => {

@@ -153,6 +153,7 @@ fn newtab_search_cannot_execute_after_its_tab_has_navigated() {
         request_id: "request-1".into(),
     };
     shell.handle(Command::SearchScoped {
+        little: false,
         query: "example.com".into(),
         context: Box::new(context.clone()),
     });
@@ -163,7 +164,7 @@ fn newtab_search_cannot_execute_after_its_tab_has_navigated() {
         id,
         input: "other.example".into(),
     });
-    let disposition = shell.operation_run_search_action(context, action, false, None);
+    let disposition = shell.operation_run_search_action(context, action, false, None, false);
     assert_eq!(disposition.outcome, OperationOutcome::Rejected);
 }
 
@@ -214,6 +215,7 @@ fn empty_local_scope_stays_pending_until_its_providers_finish() {
         request_id: "first".into(),
     };
     shell.handle(Command::SearchScoped {
+        little: false,
         query: "@notes first".into(),
         context: Box::new(context.clone()),
     });
@@ -223,6 +225,7 @@ fn empty_local_scope_stays_pending_until_its_providers_finish() {
         ..context.clone()
     };
     shell.handle(Command::SearchScoped {
+        little: false,
         query: "@notes second".into(),
         context: Box::new(next.clone()),
     });
@@ -273,6 +276,7 @@ fn late_providers_extend_their_own_section_without_reordering_the_list() {
         request_id: "first".into(),
     };
     shell.handle(Command::SearchScoped {
+        little: false,
         query: "example".into(),
         context: Box::new(context.clone()),
     });
@@ -354,6 +358,7 @@ fn one_talkative_provider_cannot_starve_the_other_sections() {
         request_id: "first".into(),
     };
     shell.handle(Command::SearchScoped {
+        little: false,
         query: "example".into(),
         context: Box::new(context.clone()),
     });
@@ -405,6 +410,7 @@ fn new_tab_offers_places_to_go_and_leaves_commands_to_the_launcher() {
         request_id: "request-1".into(),
     };
     shell.handle(Command::SearchScoped {
+        little: false,
         query: "reload".into(),
         context: Box::new(newtab.clone()),
     });
@@ -426,6 +432,7 @@ fn new_tab_offers_places_to_go_and_leaves_commands_to_the_launcher() {
         ..newtab
     };
     shell.handle(Command::SearchScoped {
+        little: false,
         query: "reload".into(),
         context: Box::new(panel),
     });
@@ -474,6 +481,7 @@ fn history_reaches_the_field_through_the_real_store_and_read_queue() {
         request_id: "request-1".into(),
     };
     shell.handle(Command::SearchScoped {
+        little: false,
         query: "notion".into(),
         context: Box::new(context),
     });

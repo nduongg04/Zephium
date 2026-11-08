@@ -57,7 +57,10 @@ impl Shell {
                 action,
                 background,
                 replace,
-            } => self.operation_run_search_action(*context, action, background, replace),
+                new_little,
+            } => {
+                self.operation_run_search_action(*context, action, background, replace, new_little)
+            }
             Command::InvokeExtensionAction {
                 runtime,
                 revision,
@@ -397,13 +400,25 @@ impl Shell {
     }
 
     /// Opens what another application handed over, each in its own tab and
-    /// the last one in front, the way a clicked link opens elsewhere.
+    /// the last one in front, the way a clicked link opens elsewhere. With
+    /// Little windows chosen, each opens in one and the main window is left
+    /// as it was; a link no Little window can take still opens as a tab.
     pub(super) fn open_external(&mut self, urls: Vec<String>) {
         let limit = zephium_core::navigation::MAX_EXTERNAL_TARGETS;
         if !self.bootstrapped {
             let room = limit.saturating_sub(self.pending_external.len());
             self.pending_external.extend(urls.into_iter().take(room));
             return;
+        }
+        let mut urls: Vec<String> = urls.into_iter().take(limit).collect();
+        if self.external_links_open_little() {
+            urls.retain(|url| {
+                zephium_core::navigation::external_target(url)
+                    .is_some_and(|url| !self.open_little(url.to_string()))
+            });
+            if urls.is_empty() {
+                return;
+            }
         }
         // Another application's link is not a private page: it opens with
         // the regular tabs, the way a private window leaves it to another.
@@ -420,10 +435,15 @@ impl Shell {
             .tab_preferences
             .external_position
             .unwrap_or(self.tab_preferences.new_position);
-        for url in urls.into_iter().take(limit) {
+        let mut opened = false;
+        for url in urls {
             if let Some(url) = zephium_core::navigation::external_target(&url) {
                 let _ = self.open_url_in_new_tab_at(url.to_string(), position);
+                opened = true;
             }
+        }
+        if opened {
+            (self.emit)(Projection::ExternalTabsOpened);
         }
     }
 
@@ -908,6 +928,9 @@ impl Shell {
         match id {
             "tab.new" => self.operation_open(),
             "window.newPrivate" => self.operation_enter_private(),
+            // Where Little windows exist native opens the launcher for one
+            // instead; elsewhere a new tab is the quick page.
+            "window.newLittle" => self.operation_open(),
             "window.closePrivate" => self.operation_close_private(),
             "tab.close" if in_work => self.operation_work_pane_hide(),
             "tab.close" if window_page.is_some() => self.operation_show_browser_page(None),

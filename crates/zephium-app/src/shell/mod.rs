@@ -16,6 +16,8 @@ mod favicon_probe;
 mod favicons;
 mod fullscreen;
 mod history;
+mod little;
+pub use little::{LITTLE_TOOLBAR_HEIGHT, LITTLE_WINDOW_SIZE, MAX_LITTLE_WINDOWS};
 mod operations;
 mod page_permissions;
 mod page_requests;
@@ -70,14 +72,14 @@ use crate::actor::{CallbackHandle, CommandQueue};
 #[cfg(feature = "agentic-browser")]
 use crate::api::AgentLifecycle;
 use crate::api::PagePermissionPromptDecision;
+#[cfg(test)]
+use crate::api::PresentationChrome;
 use crate::api::TabAction;
 use crate::api::{
-    ChromePresentation, ChromePresentationDispatch, Command, ContentPolicyStatusQueryOutcome,
-    EmitFn, SharedBlocker, SharedChrome, SharedEngine, SharedStore, ShellTerminalFailure,
-    ShellTerminalFailureCallback, ShutdownOutcome,
+    ChromePresentation, ChromePresentationCallback, ChromePresentationDispatch, Command,
+    ContentPolicyStatusQueryOutcome, EmitFn, SharedBlocker, SharedChrome, SharedEngine,
+    SharedStore, ShellTerminalFailure, ShellTerminalFailureCallback, ShutdownOutcome,
 };
-#[cfg(test)]
-use crate::api::{ChromePresentationCallback, PresentationChrome};
 #[cfg(test)]
 use crate::store_reads::FAVICON_CACHE_MAX_AGE_SECONDS;
 use crate::store_reads::{StoreReadQueue, StoreReadResult};
@@ -217,6 +219,7 @@ pub struct Shell {
     items: Items,
     recently_closed: Vec<zephium_core::session::PersistedClosedTab>,
     windows: Windows,
+    little: little::LittleState,
     pending_size: Size,
     favicons: FaviconState,
     history: history::HistoryState,
@@ -441,6 +444,7 @@ impl Shell {
             items: Items::default(),
             recently_closed: Vec::new(),
             windows: Windows::default(),
+            little: little::LittleState::default(),
             pending_size: Size::default(),
             favicons: FaviconState::default(),
             history: history::HistoryState::default(),
@@ -1117,20 +1121,29 @@ impl Shell {
                 query,
                 results,
             } => self.search_additional(*context, query, results),
-            Command::SearchScoped { query, context } => self.search_scoped(&query, *context),
+            Command::SearchScoped {
+                query,
+                context,
+                little,
+            } => self.search_scoped(&query, *context, little),
             Command::CancelSearch { session_id } => self.cancel_scoped_search(&session_id),
             Command::RunSearchAction {
                 context,
                 action,
                 background,
                 replace,
+                new_little,
             } => {
-                let _ = self.operation_run_search_action(*context, action, background, replace);
+                let _ = self
+                    .operation_run_search_action(*context, action, background, replace, new_little);
             }
             Command::OpenUrl { input, new_tab } => {
                 let _ = self.operation_open_url(input, new_tab);
             }
             Command::OpenExternal(urls) => self.open_external(urls),
+            Command::LittleAttached { window, size } => self.little_attached(window, size),
+            Command::LittleResized { window, size } => self.little_resized(window, size),
+            Command::Little { window, action } => self.little_action(window, action),
             Command::Find(request) => self.find_in_page(request),
             Command::SetAppSetting { key, value } => {
                 let _ = self.operation_set_app_setting(key, value);
