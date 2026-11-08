@@ -429,6 +429,9 @@ export function createSearchSurface(options: {
     expiresAt = 0;
     clearTimeout(expiry);
     context = next;
+    // Before the controller exists, so its first request is for the address
+    // and not for an empty field that the seed immediately replaces.
+    if (next.seed) seed(next.seed);
     if (listening) void initialize();
   }
 
@@ -489,6 +492,7 @@ export function createSearchSurface(options: {
     controller = createSearchController({
       owner,
       emptyQuery: anchored ? "skip" : "search",
+      shown: { results, answered },
       send: (value, requestId) =>
         options.tabId
           ? commands.newtabSearch(value, { ...owner, request_id: requestId })
@@ -537,7 +541,6 @@ export function createSearchSurface(options: {
     begin,
     end,
     changed,
-    seed,
     submit,
     capture,
     copy,

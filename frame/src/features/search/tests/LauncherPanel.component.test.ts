@@ -386,6 +386,52 @@ test("a launcher reopened a moment later resumes, and a fresh session asks again
   expect(native.search.mock.calls.at(-1)![0]).toBe("rust");
 });
 
+test("a reopened launcher keeps its home list on the frame it appears", async () => {
+  const tab: SearchResult = {
+    kind: "tab",
+    title: "Rust Book",
+    detail: "doc.rust-lang.org",
+    icon: null,
+    action: { type: "ActivateTab", id: "tab-1" },
+  };
+  const screen = await render(LauncherPanel, { props: { context, destinations } });
+  await reply("", [tab]);
+  await expect.element(screen.getByRole("option", { name: /Rust Book/u })).toBeVisible();
+  await vi.waitFor(() => expect(native.layout).toHaveBeenCalled());
+  const home = native.layout.mock.calls.at(-1)![0].height;
+  await screen.rerender({ context: { ...context, revision: "0000000000000002", visible: false } });
+  const calls = native.search.mock.calls.length;
+  await screen.rerender({
+    context: { ...context, revision: "0000000000000003", session_id: "0000000000000003" },
+  });
+  // The new presentation's request has gone out and nothing has answered yet.
+  await vi.waitFor(() => expect(native.search.mock.calls.length).toBeGreaterThan(calls));
+  expect(screen.container.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(native.layout.mock.calls.at(-1)![0].height).toBe(home);
+});
+
+test("editing an address asks for that address and never for an empty field first", async () => {
+  const screen = await render(LauncherPanel, {
+    props: { context: { ...context, visible: false }, destinations },
+  });
+  // Let the page start listening, so the next presentation binds a controller
+  // directly rather than waiting for one at mount.
+  await new Promise((done) => setTimeout(done, 50));
+  await screen.rerender({
+    context: {
+      ...context,
+      revision: "0000000000000002",
+      session_id: "0000000000000002",
+      seed: "https://example.com/",
+      seed_tab: "tab-1",
+    },
+  });
+  await vi.waitFor(() => expect(native.search).toHaveBeenCalled());
+  await new Promise((done) => setTimeout(done, 100));
+  expect(native.search.mock.calls.map(([query]) => query)).toEqual(["https://example.com/"]);
+  await expect.element(screen.getByRole("combobox")).toHaveValue("https://example.com/");
+});
+
 test("sleeping past the resume deadline clears a query even when its timer never fired", async () => {
   const screen = await render(LauncherPanel, { props: { context, destinations } });
   await screen.getByRole("combobox").fill("private old query");
